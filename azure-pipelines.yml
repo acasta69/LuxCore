@@ -35,4 +35,4 @@ jobs:
   container: WindowsContainer
 
   steps:
-  -script: echo hello from Windows
+  - script: echo hello from Windows
