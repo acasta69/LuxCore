@@ -3,10 +3,10 @@
 
 resources:
   containers:
-  # - container: LinuxContainer
-    # image: ubuntu:14.04
-  - container: WindowsContainer
-    image: microsoft/windowsservercore
+  - container: LinuxContainer
+    image: ubuntu:14.04
+  # - container: WindowsContainer
+    # image: microsoft/nanoserver:2018
 
 jobs:
 # - job: LuxCoreRenderLinux
@@ -30,9 +30,9 @@ jobs:
 - job: LuxCoreRenderWindows
   timeoutInMinutes: 0
   pool:
-    vmImage: 'win1803'
+    vmImage: 'vs2017-win2016'
 
-  container: WindowsContainer
+  # container: WindowsContainer
 
   steps:
   - script: echo hello from Windows
