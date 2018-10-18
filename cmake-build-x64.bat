@@ -55,7 +55,7 @@ if not exist "%LUXCORE_ROOT%" goto LuxCoreNotFound
 
 :: Determine if we have CMake 2 or 3
 "%CMAKE%" --version
-find
+find /^?
 for /F "usebackq tokens=3" %%G in (`cmd /c "%CMAKE%" --version ^| find "cmake version"`) do set CMAKE_VER=%%G
 for /F "tokens=1 delims=." %%G in ("%CMAKE_VER%") do set CMAKE_VN_MAJOR=%%G
 echo We are using CMake version: %CMAKE_VN_MAJOR%
