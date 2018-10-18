@@ -12,7 +12,7 @@ mklink /J Luxcore .\s
 :: Clone LuxCore (this is a bit a waste but WindowsCompile procedure
 :: doesn't work with symbolic links)
 ::git clone https://github.com/acasta69/Luxcore.git
-dir
+copy .\Luxcore\cmake-build-x64.bat .\WindowsCompile\cmake-build-x64.bat
 cd WindowsCompile
 call .\cmake-build-x64.bat
 ::mv target-64-sse2/LuxCore.tar.bz2 target-64-sse2/luxcorerender-latest-linux64.tar.bz2
