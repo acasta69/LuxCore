@@ -36,3 +36,4 @@ jobs:
 
   steps:
   - script: echo hello from Windows
+  - script: ./scripts/azurepipeline/build.bat
