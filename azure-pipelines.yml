@@ -6,7 +6,7 @@ resources:
   # - container: LinuxContainer
     # image: ubuntu:14.04
   - container: WindowsContainer
-    image: windowsservercore
+    image: microsoft/windowsservercore
 
 jobs:
 # - job: LuxCoreRenderLinux
