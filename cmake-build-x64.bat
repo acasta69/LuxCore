@@ -54,9 +54,6 @@ if not exist "%CMAKE%" goto CMakeNotFound
 if not exist "%LUXCORE_ROOT%" goto LuxCoreNotFound
 
 :: Determine if we have CMake 2 or 3
-"%CMAKE%" --version > cmake_version
-type cmake_version
-echo %COMSPEC%
 ::for /F "tokens=3" %%G in ('cmd /c "%CMAKE%" --version ^| find "cmake version"') do set CMAKE_VER=%%G
 ::for /F "tokens=1 delims=." %%G in ("%CMAKE_VER%") do set CMAKE_VN_MAJOR=%%G
 ::echo We are using CMake version: %CMAKE_VN_MAJOR%
@@ -69,8 +66,8 @@ if "%CPU_PLATFORM%"=="x64" (
   set CMAKE_PLATFORM=
   set CMAKE_TOOLSET=
 )
-
-if %CMAKE_VN_MAJOR%==2 (
+echo Succeded setting CPU_PLATFORM
+if %CMAKE_VN_MAJOR%=="2" (
   echo You need CMake 3.7 or better to build LuxCoreRender
   goto CMakeNotFound
 )
@@ -102,7 +99,7 @@ if %BUILD_DLL% EQU 1 (
 ) else (
   set DLL_OPTION=
 )
-
+echo Now setting CMAKE_OPTS
 set CMAKE_OPTS=-G %CMAKE_GENERATOR% %CMAKE_PLATFORM% %CMAKE_TOOLSET% -D CMAKE_INCLUDE_PATH="%INCLUDE_DIR%" -D CMAKE_LIBRARY_PATH="%LIB_DIR%" -D PYTHON_LIBRARY="%LIB_DIR%" -D PYTHON_V="%PYTHON_VERSION%" -D PYTHON_INCLUDE_DIR="%INCLUDE_DIR%\Python%PYTHON_VERSION%" -D CMAKE_BUILD_TYPE=%BUILD_TYPE% %OCL_OPTION% %DLL_OPTION%
 rem To display only errors add: /clp:ErrorsOnly
 set MSBUILD_OPTS=/nologo /maxcpucount /verbosity:normal /toolsversion:15.0 /property:"Platform=%MSBUILD_PLATFORM%" /property:"Configuration=%BUILD_TYPE%" /p:WarningLevel=0

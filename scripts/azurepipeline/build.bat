@@ -11,7 +11,7 @@ mklink /J Luxcore .\s
 copy .\Luxcore\cmake-build-x64.bat .\WindowsCompile\cmake-build-x64.bat
 cd WindowsCompile
 set
-cmd /k ""C:\Program Files (x86)\Microsoft Visual Studio\2017\BuildTools\VC\Auxiliary\Build\vcvars64.bat""
+::cmd /k ""C:\Program Files (x86)\Microsoft Visual Studio\2017\BuildTools\VC\Auxiliary\Build\vcvars64.bat""
 call .\cmake-build-x64.bat
 exit
 ::mv target-64-sse2/LuxCore.tar.bz2 target-64-sse2/luxcorerender-latest-linux64.tar.bz2
