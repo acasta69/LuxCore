@@ -10,6 +10,7 @@ mklink /J Luxcore .\s
 ::git clone https://github.com/acasta69/Luxcore.git
 copy .\Luxcore\cmake-build-x64.bat .\WindowsCompile\cmake-build-x64.bat
 cd WindowsCompile
+set
 cmd /k ""C:\Program Files (x86)\Microsoft Visual Studio\2017\BuildTools\VC\Auxiliary\Build\vcvars64.bat""
 call .\cmake-build-x64.bat
 exit
