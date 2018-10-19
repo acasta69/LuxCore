@@ -3,10 +3,6 @@ cd ..
 git clone https://github.com/acasta69/WindowsCompile.git
 git clone https://github.com/acasta69/WindowsCompileDeps.git
 
-dir .\a
-dir .\b
-dir .\s
-
 mklink /J Luxcore .\s
 
 :: Clone LuxCore (this is a bit a waste but WindowsCompile procedure
@@ -14,6 +10,8 @@ mklink /J Luxcore .\s
 ::git clone https://github.com/acasta69/Luxcore.git
 copy .\Luxcore\cmake-build-x64.bat .\WindowsCompile\cmake-build-x64.bat
 cd WindowsCompile
+cmd /k "C:\Program Files (x86)\Microsoft Visual Studio\2017\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 call .\cmake-build-x64.bat
+exit
 ::mv target-64-sse2/LuxCore.tar.bz2 target-64-sse2/luxcorerender-latest-linux64.tar.bz2
 cd ..
