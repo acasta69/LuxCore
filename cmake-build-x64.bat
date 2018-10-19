@@ -66,16 +66,16 @@ if "%CPU_PLATFORM%"=="x64" (
   set CMAKE_PLATFORM=
   set CMAKE_TOOLSET=
 )
-echo Succeded setting CPU_PLATFORM
-if %CMAKE_VN_MAJOR%=="2" (
-  echo You need CMake 3.7 or better to build LuxCoreRender
-  goto CMakeNotFound
-)
+
+REM if %CMAKE_VN_MAJOR%=="2" (
+  REM echo You need CMake 3.7 or better to build LuxCoreRender
+  REM goto CMakeNotFound
+REM )
 
 for %%a in (..\WindowsCompileDeps\include) do set INCLUDE_DIR=%%~fa
 for %%a in (..\WindowsCompileDeps\%CPU_PLATFORM%\Release\lib) do set LIB_DIR=%%~fa
 echo LIB_DIR: %LIB_DIR%
-
+echo Analyzing OPENCL build
 if %DISABLE_OPENCL% EQU 1 (
   echo -----------------------------------------
   echo Disabling OpenCL
@@ -89,7 +89,7 @@ if %DISABLE_OPENCL% EQU 1 (
     set OCL_OPTION=
   )
 )
-
+echo Analyzing DLL build
 if %BUILD_DLL% EQU 1 (
   echo -----------------------------------------
   echo Enable LuxCore DLL
