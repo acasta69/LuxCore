@@ -2,7 +2,9 @@
 cd ..
 git clone --branch master https://github.com/acasta69/WindowsCompile .\WindowsCompile
 git -c filter.lfs.smudge= -c filter.lfs.required=false -c diff.mnemonicprefix=false -c core.quotepath=false --no-optional-locks clone --branch master https://github.com/acasta69/WindowsCompileDeps .\WindowsCompileDeps
-git lfs pull .\WindowsCompileDeps
+cd WindowsCompileDeps
+git lfs pull
+cd ..
 
 mklink /J Luxcore .\s
 
