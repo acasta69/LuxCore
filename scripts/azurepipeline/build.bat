@@ -1,13 +1,13 @@
 :: Clone WindowsCompile
 cd ..
 git clone --branch master https://github.com/acasta69/WindowsCompile .\WindowsCompile
-git clone --branch master https://github.com/acasta69/WindowsCompileDeps .\WindowsCompileDeps
+git -c filter.lfs.smudge= -c filter.lfs.required=false -c diff.mnemonicprefix=false -c core.quotepath=false --no-optional-locks clone --branch master https://github.com/acasta69/WindowsCompileDeps .\WindowsCompileDeps
 
 mklink /J Luxcore .\s
 
 dir
 dir Luxcore
-dir /S WindowsCompileDeps
+dir /S WindowsCompileDeps\x64
 :: Clone LuxCore (this is a bit a waste but WindowsCompile procedure
 :: doesn't work with symbolic links)
 ::git clone https://github.com/acasta69/Luxcore.git
