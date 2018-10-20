@@ -36,3 +36,21 @@ jobs:
 
   steps:
   - script: ./scripts/azurepipeline/build.bat
+    displayName: Generating build files with CMake
+  - task: MSBuild@1
+    inputs:
+      solution: 'LuxRays.sln' 
+      #msbuildLocationMethod: 'version' # Optional. Options: version, location
+      msbuildVersion: '15.0' # Optional. Options: latest, 15.0, 14.0, 12.0, 4.0
+      msbuildArchitecture: 'x64' # Optional. Options: x86, x64
+      #msbuildLocation: # Optional
+      platform: 'x64' # Optional
+      configuration: 'Release' # Optional
+      msbuildArguments: '/nologo /verbosity:normal /p:WarningLevel=0' # Optional
+      #clean: false # Optional
+      maximumCpuCount: true # Optional
+      #restoreNugetPackages: false # Optional
+      #logProjectEvents: false # Optional
+      createLogFile: true # Optional
+    displayName: Building LuxCore
+
