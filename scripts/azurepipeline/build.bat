@@ -1,7 +1,7 @@
 :: Clone WindowsCompile
 cd ..
-git clone https://github.com/acasta69/WindowsCompile.git
-git lfs clone https://github.com/acasta69/WindowsCompileDeps.git
+git clone --branch master https://github.com/acasta69/WindowsCompile .\WindowsCompile
+git clone --branch master https://github.com/acasta69/WindowsCompileDeps .\WindowsCompileDeps
 
 mklink /J Luxcore .\s
 
