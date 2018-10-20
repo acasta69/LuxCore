@@ -1,10 +1,13 @@
 :: Clone WindowsCompile
 cd ..
 git clone https://github.com/acasta69/WindowsCompile.git
-git clone https://github.com/acasta69/WindowsCompileDeps.git
+git lfs clone https://github.com/acasta69/WindowsCompileDeps.git
 
 mklink /J Luxcore .\s
 
+dir
+dir Luxcore
+dir WindowsCompileDeps
 :: Clone LuxCore (this is a bit a waste but WindowsCompile procedure
 :: doesn't work with symbolic links)
 ::git clone https://github.com/acasta69/Luxcore.git
