@@ -75,7 +75,7 @@ REM )
 for %%a in (..\WindowsCompileDeps\include) do set INCLUDE_DIR=%%~fa
 for %%a in (..\WindowsCompileDeps\%CPU_PLATFORM%\Release\lib) do set LIB_DIR=%%~fa
 echo LIB_DIR: %LIB_DIR%
-echo Analyzing OPENCL build
+
 if %DISABLE_OPENCL% EQU 1 (
   echo -----------------------------------------
   echo Disabling OpenCL
@@ -89,7 +89,7 @@ if %DISABLE_OPENCL% EQU 1 (
     set OCL_OPTION=
   )
 )
-echo Analyzing DLL build
+
 if %BUILD_DLL% EQU 1 (
   echo -----------------------------------------
   echo Enable LuxCore DLL
@@ -123,7 +123,7 @@ if exist %CMAKE_CACHE% del %CMAKE_CACHE%
 "%CMAKE%" %CMAKE_OPTS% %LUXCORE_ROOT%
 if ERRORLEVEL 1 goto CMakeError
 
-msbuild %MSBUILD_OPTS% LuxRays.sln
+::msbuild %MSBUILD_OPTS% LuxRays.sln
 if ERRORLEVEL 1 goto CMakeError
 
 cd ..
