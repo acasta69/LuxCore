@@ -3,10 +3,12 @@ cd ..
 git lfs install
 git clone --branch master https://github.com/acasta69/WindowsCompile .\WindowsCompile
 git clone --branch master https://github.com/acasta69/WindowsCompileDeps .\WindowsCompileDeps
-
+dir
 mklink /J Luxcore .\s
 
+echo C:\Program Files\7-Zip\7z.exe
 "C:\Program Files\7-Zip\7z.exe"
+echo C:\Program Files (x86)\7-Zip\7z.exe
 "C:\Program Files (x86)\7-Zip\7z.exe"
 
 copy .\Luxcore\cmake-build-x64.bat .\WindowsCompile\cmake-build-x64.cmd
