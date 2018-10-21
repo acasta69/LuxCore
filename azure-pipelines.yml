@@ -54,4 +54,4 @@ jobs:
       createLogFile: true # Optional
     displayName: Building LuxCore
   - script: ./scripts/azurepipeline/post-build.bat
-    displayName Gathering and packing binaries
+    displayName: Gathering and packing binaries
