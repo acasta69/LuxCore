@@ -55,3 +55,9 @@ jobs:
     displayName: Building LuxCore
   - script: ./scripts/azurepipeline/post-build.bat
     displayName: Gathering and packing binaries
+  - task: PublishBuildArtifacts@1
+    inputs:
+      pathtoPublish: '$(System.DefaultWorkingDirectory)\..\WindowsCompile\luxcorerender-latest-win64.zip'
+      artifactName: LuxCore
+    displayName: 'Upload luxcorerender-latest-win64.zip'
+    condition: eq(variables['System.PullRequest.IsFork'], 'False')
