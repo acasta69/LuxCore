@@ -5,6 +5,7 @@ git clone --branch master https://github.com/acasta69/WindowsCompile .\WindowsCo
 git clone --branch master https://github.com/acasta69/WindowsCompileDeps .\WindowsCompileDeps
 dir C:\
 dir "C:\Program Files"
+dir "C:\Program Files (x86)"
 mklink /J Luxcore .\s
 
 copy .\Luxcore\cmake-build-x64.bat .\WindowsCompile\cmake-build-x64.cmd
