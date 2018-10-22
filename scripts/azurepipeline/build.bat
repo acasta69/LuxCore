@@ -8,6 +8,12 @@ dir "C:\Program Files"
 dir "C:\Program Files (x86)"
 mklink /J Luxcore .\s
 
+pip --version
+pip install pyinstaller
+pip install numpy==1.12.1
+.\WindowsCompile\support\bin\wget.exe https://download.lfd.uci.edu/pythonlibs/h2ufg7oq/PySide-1.2.4-cp35-cp35m-win_amd64.whl -O PySide-1.2.4-cp35-cp35m-win_amd64.whl
+pip install PySide-1.2.4-cp35-cp35m-win_amd64.whl
+
 copy .\Luxcore\cmake-build-x64.bat .\WindowsCompile\cmake-build-x64.cmd
 copy .\Luxcore\create-standalone.bat .\WindowsCompile\create-standalone.cmd
 cd WindowsCompile
