@@ -35,19 +35,30 @@ using namespace slg;
 Material::Material(const Texture *transp, const Texture *emitted, const Texture *bump) :
 		NamedObject("material"),
 		matID(0), lightID(0),
-		directLightSamplingType(DLS_AUTO), samples(-1), emittedSamples(-1), emittedImportance(1.f),
+		directLightSamplingType(DLS_AUTO), emittedImportance(1.f),
 		emittedGain(1.f), emittedPower(0.f), emittedEfficency(0.f),
 		transparencyTex(transp), emittedTex(emitted), bumpTex(bump), bumpSampleDistance(.001f),
 		emissionMap(NULL), emissionFunc(NULL),
 		interiorVolume(NULL), exteriorVolume(NULL),
 		isVisibleIndirectDiffuse(true), isVisibleIndirectGlossy(true), isVisibleIndirectSpecular(true),
-		isShadowCatcher(false), isShadowCatcherOnlyInfiniteLights(false) {
+		isShadowCatcher(false), isShadowCatcherOnlyInfiniteLights(false), isPhotonGIEnabled(true) {
 	SetEmittedTheta(90.f);
 	UpdateEmittedFactor();
 }
 
 Material::~Material() {
 	delete emissionFunc;
+}
+
+bool Material::IsPhotonGIEnabled() const {
+	const BSDFEvent eventTypes = GetEventTypes();
+	
+	if ((eventTypes == (DIFFUSE | REFLECT)) ||
+			(eventTypes == (GLOSSY | REFLECT)) ||
+			(eventTypes == (DIFFUSE | GLOSSY | REFLECT))) {
+		return isPhotonGIEnabled;
+	} else
+		return false;
 }
 
 void Material::SetEmittedTheta(const float theta) {
@@ -109,6 +120,39 @@ void Material::Bump(HitPoint *hitPoint) const {
 	}
 }
 
+Spectrum Material::EvaluateTotal(const HitPoint &hitPoint) const {
+	// This is the generic implementation using Monte Carlo integration to
+	// compute the result.
+	//
+	// Note: Matte material has a special fast path.
+
+	assert (!hitPoint.fromLight);
+
+	// Note: may be, this should become a configurable parameter
+	const u_int samplesCount = 64;
+
+	Spectrum result;
+	for (u_int i = 0; i < samplesCount; ++i) {
+		const float u1 = RadicalInverse(i, 3);
+		const float u2 = RadicalInverse(i, 5);
+		const float u3 = RadicalInverse(i, 7);
+		
+		const Vector fixedDir = UniformSampleHemisphere(u1, u2);
+		const float fixedDirPdf = UniformHemispherePdf(u1, u2);
+
+		BSDFEvent event;
+		Vector sampledDir;
+		float sampledDirPdf, cosSampledDir;
+		Spectrum bsdfSample = Sample(hitPoint, fixedDir, &sampledDir,
+					u1, u2,	u3, &sampledDirPdf, &cosSampledDir, &event);
+
+		if (!bsdfSample.Black() && (CosTheta(sampledDir) > 0.f))
+				result += bsdfSample * CosTheta(fixedDir) / fixedDirPdf;
+    }
+
+    return result / (M_PI * samplesCount);
+}
+
 void Material::UpdateEmittedFactor() {
 	if (emittedTex) {
 		emittedFactor = emittedGain * (emittedPower * emittedEfficency / emittedTex->Y());
@@ -141,7 +185,6 @@ Properties Material::ToProperties(const ImageMapCache &imgMapCache, const bool u
 	props.Set(Property("scene.materials." + name + ".emission.power")(emittedPower));
 	props.Set(Property("scene.materials." + name + ".emission.efficency")(emittedEfficency));
 	props.Set(Property("scene.materials." + name + ".emission.theta")(emittedTheta));
-	props.Set(Property("scene.materials." + name + ".emission.samples")(emittedSamples));
 	props.Set(Property("scene.materials." + name + ".emission.id")(lightID));
 	if (emittedTex)
 		props.Set(Property("scene.materials." + name + ".emission")(emittedTex->GetName()));
@@ -427,7 +470,7 @@ Spectrum slg::SchlickBSDF_CoatingSampleF(const bool fromLight, const Spectrum ks
 	const float coso = fabsf(localFixedDir.z);
 	const float cosi = fabsf(localSampledDir->z);
 
-	*pdf = specPdf / (4.f * fabsf(cosWH));
+	*pdf = specPdf / (4.f * cosWH);
 	if (*pdf <= 0.f)
 		return Spectrum();
 

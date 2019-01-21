@@ -36,7 +36,76 @@ using namespace luxrays;
 using namespace slg;
 
 //------------------------------------------------------------------------------
-// Direct light sampling cache
+// DLSCacheEntry
+//------------------------------------------------------------------------------
+
+DLSCacheEntry::DLSCacheEntry() :
+		lightsDistribution(nullptr), tmpInfo(nullptr) {
+}
+
+DLSCacheEntry::DLSCacheEntry(DLSCacheEntry &&other) {
+	p = other.p;
+	n = other.n;
+	isVolume = other.isVolume;
+
+	distributionIndexToLightIndex = other.distributionIndexToLightIndex;
+
+	// we "steal" the resource from "other"
+	lightsDistribution = other.lightsDistribution;
+	tmpInfo = other.tmpInfo;
+
+	// "other" will soon be destroyed and its destructor will do nothing
+	// because we null out its resource here
+	other.lightsDistribution = nullptr;
+	other.tmpInfo = nullptr;
+}
+
+DLSCacheEntry::~DLSCacheEntry() {
+	DeleteTmpInfo();
+
+	delete lightsDistribution;		
+}
+
+DLSCacheEntry &DLSCacheEntry::operator=(DLSCacheEntry &&other) {
+	p = other.p;
+	n = other.n;
+	isVolume = other.isVolume;
+
+	distributionIndexToLightIndex = other.distributionIndexToLightIndex;
+
+	// "other" is soon going to be destroyed, so we let it destroy our
+	// current resource instead and we take "other"'s current resource via
+	// swapping
+	std::swap(lightsDistribution, other.lightsDistribution);
+	std::swap(tmpInfo, other.tmpInfo);
+
+	return *this;
+}
+
+void DLSCacheEntry::AddSamplingPoint(const luxrays::Point &pnt, const luxrays::Normal &nml, 
+			const bool isTrans, const PathVolumeInfo &vi) {
+	tmpInfo->isTransparent = (tmpInfo->isTransparent || isTrans);
+	tmpInfo->samplingPoints.push_back(DLSCachePoint(pnt, nml, vi));	
+}
+
+void DLSCacheEntry::Init(const luxrays::Point &pnt, const luxrays::Normal &nml,
+		const bool isVol, const bool isTrans, const PathVolumeInfo &vi) {
+	p = pnt;
+	n = nml;
+	isVolume = isVol;
+	
+	delete lightsDistribution;
+	lightsDistribution = nullptr;
+
+	delete tmpInfo;
+	tmpInfo = new TemporayInformation();
+
+	// Add the initial point as a valid sampling point
+	AddSamplingPoint(p, n, isTrans, vi);
+}
+
+//------------------------------------------------------------------------------
+// DirectLightSamplingCache
 //------------------------------------------------------------------------------
 
 DirectLightSamplingCache::DirectLightSamplingCache() {
@@ -50,6 +119,7 @@ DirectLightSamplingCache::DirectLightSamplingCache() {
 	entryNormalAngle = 10.f;
 	entryConvergenceThreshold = .01f;
 	entryWarmUpSamples = 12;
+	entryMergePasses = 3;
 
 	entryOnVolumes = false;
 
@@ -60,10 +130,11 @@ DirectLightSamplingCache::DirectLightSamplingCache() {
 DirectLightSamplingCache::~DirectLightSamplingCache() {
 	delete octree;
 	delete bvh;
-
-	for (auto entry : allEntries)
-		delete entry;
 }
+
+//------------------------------------------------------------------------------
+// Build the list of cache entries
+//------------------------------------------------------------------------------
 
 void DirectLightSamplingCache::GenerateEyeRay(const Camera *camera, Ray &eyeRay,
 		PathVolumeInfo &volInfo, Sampler *sampler, SampleResult &sampleResult) const {
@@ -80,7 +151,7 @@ void DirectLightSamplingCache::BuildCacheEntries(const Scene *scene) {
 
 	// Initialize the Octree where to store the cache points
 	delete octree;
-	octree = new DLSCOctree(scene->dataSet->GetBBox(), entryRadius, entryNormalAngle);
+	octree = new DLSCOctree(allEntries, scene->dataSet->GetBBox(), entryRadius, entryNormalAngle);
 			
 	// Initialize the sampler
 	RandomGenerator rnd(131);
@@ -146,18 +217,34 @@ void DirectLightSamplingCache::BuildCacheEntries(const Scene *scene) {
 			//------------------------------------------------------------------
 
 			// Check if I have to flip the normal
-			const Normal surfaceGeometryNormal = bsdf.hitPoint.intoObject ? bsdf.hitPoint.geometryN : -bsdf.hitPoint.geometryN;
+			const Normal surfaceNormal = bsdf.hitPoint.intoObject ? bsdf.hitPoint.shadeN : -bsdf.hitPoint.shadeN;
 
 			if (!bsdf.IsDelta() && (entryOnVolumes || !bsdf.IsVolume())) {
 				// Check if a cache entry is available for this point
-				if (octree->GetEntry(bsdf.hitPoint.p, surfaceGeometryNormal, bsdf.IsVolume()))
-					++cacheHits;
-				else {
-					DLSCacheEntry *entry = new DLSCacheEntry(bsdf.hitPoint.p,
-							surfaceGeometryNormal, bsdf.IsVolume(), volInfo);
-					allEntries.push_back(entry);
+				u_int entryIndex = octree->GetEntry(bsdf.hitPoint.p, surfaceNormal, bsdf.IsVolume());
+				if (entryIndex != NULL_INDEX) {
+					DLSCacheEntry &entry = allEntries[entryIndex];
 
-					octree->Add(entry);
+					// Check if the number of sampling points is full.
+
+					// At the moment, 256 is an hard coded limit but my be a
+					// parameter in the future.
+					if (entry.tmpInfo->samplingPoints.size() < 256) {
+						// It isn't. Add a new sampling points.
+						entry.AddSamplingPoint(bsdf.hitPoint.p, surfaceNormal,
+								bsdf.GetEventTypes() & TRANSMIT, volInfo);
+					}
+					++cacheHits;
+				} else {
+					// Add as last entry
+					allEntries.resize(allEntries.size() + 1);
+					entryIndex = allEntries.size() - 1;
+
+					DLSCacheEntry &entry = allEntries[entryIndex];
+					entry.Init(bsdf.hitPoint.p, surfaceNormal, bsdf.IsVolume(),
+							bsdf.GetEventTypes() & TRANSMIT, volInfo);
+
+					octree->Add(entryIndex);
 				}
 				++cacheLookUp;
 			}
@@ -196,7 +283,7 @@ void DirectLightSamplingCache::BuildCacheEntries(const Scene *scene) {
 			// Update volume information
 			volInfo.Update(lastBSDFEvent, bsdf);
 
-			eyeRay.Update(bsdf.hitPoint.p, surfaceGeometryNormal, sampledDir);
+			eyeRay.Update(bsdf.hitPoint.p, surfaceNormal, sampledDir);
 		}
 		
 		sampler.NextSample(sampleResults);
@@ -236,30 +323,42 @@ void DirectLightSamplingCache::BuildCacheEntries(const Scene *scene) {
 
 	if (!cacheHitRateIsGood)
 		SLG_LOG("WARNING: direct light sampling cache hit rate is not good enough: " << boost::str(boost::format("%.4f") % cacheHitRate) << "%");
-		
+
+	allEntries.shrink_to_fit();
 	SLG_LOG("Direct light sampling cache total entries: " << allEntries.size());
 }
+
+//------------------------------------------------------------------------------
+// Fill cache entry
+//------------------------------------------------------------------------------
 
 float DirectLightSamplingCache::SampleLight(const Scene *scene, DLSCacheEntry *entry,
 		const LightSource *light, const u_int pass) const {
 	const float u1 = RadicalInverse(pass, 3);
 	const float u2 = RadicalInverse(pass, 5);
 	const float u3 = RadicalInverse(pass, 7);
+	const float u4 = RadicalInverse(pass, 11);
+
+	// Select a sampling point
+	const size_t samplingPointsSize = entry->tmpInfo->samplingPoints.size();
+	const u_int samplingPointIndex = Min<u_int>(Floor2UInt(u4 * samplingPointsSize), samplingPointsSize - 1);
+	const DLSCachePoint &samplingPoint = entry->tmpInfo->samplingPoints[samplingPointIndex];
 
 	Vector lightRayDir;
 	float distance, directPdfW;
-	Spectrum lightRadiance = light->Illuminate(*scene, entry->p,
+	Spectrum lightRadiance = light->Illuminate(*scene, samplingPoint.p,
 			u1, u2, u3, &lightRayDir, &distance, &directPdfW);
 	assert (!lightRadiance.IsNaN() && !lightRadiance.IsInf());
 
-	const float dotLight = Dot(lightRayDir, entry->n);
-	if (!lightRadiance.Black() && (dotLight > 0.f)) {
+	if (!lightRadiance.Black() && (entry->isVolume ||
+			entry->tmpInfo->isTransparent ||
+			Dot(lightRayDir, samplingPoint.n) > 0.f)) {
 		assert (!isnan(directPdfW) && !isinf(directPdfW));
 
-		const float time = RadicalInverse(pass, 11);
-		const float u4 = RadicalInverse(pass, 13);
+		const float time = RadicalInverse(pass, 13);
+		const float u5 = RadicalInverse(pass, 17);
 
-		Ray shadowRay(entry->p, lightRayDir,
+		Ray shadowRay(samplingPoint.p, lightRayDir,
 				0.f,
 				distance,
 				time);
@@ -269,12 +368,14 @@ float DirectLightSamplingCache::SampleLight(const Scene *scene, DLSCacheEntry *e
 		Spectrum connectionThroughput;
 
 		// Check if the light source is visible
-		if (!scene->Intersect(NULL, false, false, &(entry->tmpInfo->volInfo), u4, &shadowRay,
+		if (!scene->Intersect(NULL, false, false, &(entry->tmpInfo->samplingPoints[0].volInfo), u5, &shadowRay,
 				&shadowRayHit, &shadowBsdf, &connectionThroughput)) {
 			// It is
-			const Spectrum receivedRadiance = dotLight * connectionThroughput * lightRadiance;
+			const Spectrum incomingRadiance = connectionThroughput * (lightRadiance / directPdfW);
 
-			return receivedRadiance.Y();
+			assert (!incomingRadiance.IsNaN() && !incomingRadiance.IsInf());
+
+			return incomingRadiance.Y();
 		}
 	}
 	
@@ -290,14 +391,33 @@ void DirectLightSamplingCache::FillCacheEntry(const Scene *scene, DLSCacheEntry 
 	for (u_int lightIndex = 0; lightIndex < lights.size(); ++lightIndex) {
 		const LightSource *light = lights[lightIndex];
 	
+		// Check if the light source uses direct light sampling
+		if (!light->IsDirectLightSamplingEnabled()) {
+			// This light source is excluded from direct light sampling
+			continue;
+		}
+
 		// Check if I can avoid to trace all shadow rays
-		if (light->IsAlwaysInShadow(*scene, entry->p, entry->n)) {
+		bool isAlwaysInShadow = true;
+		for (DLSCachePoint &samplingPoint : entry->tmpInfo->samplingPoints) {
+			if (!light->IsAlwaysInShadow(*scene, samplingPoint.p, samplingPoint.n)) {
+				isAlwaysInShadow = false;
+				break;
+			}
+		}
+
+		if (isAlwaysInShadow) {
 			// It is always in shadow
 			continue;
 		}
 		
+		// Most env. light sources are hard to sample and can lead to wrong cache
+		// entries. Use not less than 512 samples for them.
+		const u_int currentWarmUpSamples = (light->IsEnvironmental() && (light->GetType() != TYPE_SUN)) ?
+			Max(entryWarmUpSamples, 512u) : entryWarmUpSamples;
+
 		float receivedLuminance = 0.f;
-		boost::circular_buffer<float> entryReceivedLuminancePreviousStep(entryWarmUpSamples, 0.f);
+		boost::circular_buffer<float> entryReceivedLuminancePreviousStep(currentWarmUpSamples, 0.f);
 
 		u_int pass = 0;
 		for (; pass < maxEntryPasses; ++pass) {
@@ -305,7 +425,7 @@ void DirectLightSamplingCache::FillCacheEntry(const Scene *scene, DLSCacheEntry 
 			
 			const float currentStepValue = receivedLuminance / pass;
 
-			if (pass > entryWarmUpSamples) {
+			if (pass > currentWarmUpSamples) {
 				// Convergence test, check if it is time to stop sampling
 				// this light source. Using an 1% threshold.
 
@@ -389,39 +509,46 @@ void DirectLightSamplingCache::FillCacheEntries(const Scene *scene) {
 			}
 		}
 		
-		FillCacheEntry(scene, allEntries[i]);
+		FillCacheEntry(scene, &allEntries[i]);
 		
 		++counter;
 	}
 }
 
-void DirectLightSamplingCache::MergeCacheEntry(const Scene *scene, DLSCacheEntry *entry) {
+//------------------------------------------------------------------------------
+// Merge entry information
+//------------------------------------------------------------------------------
+
+void DirectLightSamplingCache::MergeCacheEntry(const Scene *scene, const u_int entryIndex) {
+	const DLSCacheEntry &entry = allEntries[entryIndex];
+
 	// Copy the temporary information
-	entry->tmpInfo->mergedLightReceivedLuminance = entry->tmpInfo->lightReceivedLuminance;
-	entry->tmpInfo->mergedDistributionIndexToLightIndex = entry->tmpInfo->distributionIndexToLightIndex;
+	entry.tmpInfo->mergedLightReceivedLuminance = entry.tmpInfo->lightReceivedLuminance;
+	entry.tmpInfo->mergedDistributionIndexToLightIndex = entry.tmpInfo->distributionIndexToLightIndex;
 
 	// Look for all near cache entries
-	vector<DLSCacheEntry *> nearEntries;
-	octree->GetAllNearEntries(nearEntries, entry->p, entry->n, entry->isVolume,
+	vector<u_int> nearEntriesIndex;
+	octree->GetAllNearEntries(nearEntriesIndex, entry.p, entry.n, entry.isVolume,
 			entryRadius * 2.f);
 
 	// Merge all found entries
-	for (auto nearEntry : nearEntries) {
+	for (auto const &nearEntryindex : nearEntriesIndex) {
 		// Avoid to merge with myself
-		if (nearEntry == entry)
+		if (nearEntryindex == entryIndex)
 			continue;
 
-		for (u_int i = 0; i < nearEntry->tmpInfo->distributionIndexToLightIndex.size(); ++i) {
-			const u_int lightIndex = nearEntry->tmpInfo->distributionIndexToLightIndex[i];
+		const DLSCacheEntry &nearEntry = allEntries[nearEntryindex];
+		for (u_int i = 0; i < nearEntry.tmpInfo->distributionIndexToLightIndex.size(); ++i) {
+			const u_int lightIndex = nearEntry.tmpInfo->distributionIndexToLightIndex[i];
 			
 			// Check if I have already this light
 			bool found = false;
-			for (u_int j = 0; j < entry->tmpInfo->mergedDistributionIndexToLightIndex.size(); ++j) {
-				if (lightIndex == entry->tmpInfo->mergedDistributionIndexToLightIndex[j]) {
+			for (u_int j = 0; j < entry.tmpInfo->mergedDistributionIndexToLightIndex.size(); ++j) {
+				if (lightIndex == entry.tmpInfo->mergedDistributionIndexToLightIndex[j]) {
 					// It is a light source I already have
 					
-					entry->tmpInfo->mergedLightReceivedLuminance[j] = (entry->tmpInfo->mergedLightReceivedLuminance[j] +
-							nearEntry->tmpInfo->lightReceivedLuminance[i]) * .5f;
+					entry.tmpInfo->mergedLightReceivedLuminance[j] = Max(entry.tmpInfo->mergedLightReceivedLuminance[j],
+							nearEntry.tmpInfo->lightReceivedLuminance[i]);
 					found = true;
 					break;
 				}
@@ -429,24 +556,105 @@ void DirectLightSamplingCache::MergeCacheEntry(const Scene *scene, DLSCacheEntry
 			
 			if (!found) {
 				// It is a new light
-				entry->tmpInfo->mergedLightReceivedLuminance.push_back(nearEntry->tmpInfo->lightReceivedLuminance[i]);
-				entry->tmpInfo->mergedDistributionIndexToLightIndex.push_back(lightIndex);
+				entry.tmpInfo->mergedLightReceivedLuminance.push_back(nearEntry.tmpInfo->lightReceivedLuminance[i]);
+				entry.tmpInfo->mergedDistributionIndexToLightIndex.push_back(lightIndex);
 			}
 		}
 	}
+}
 
-	// Initialize the distribution
-	if (entry->tmpInfo->mergedLightReceivedLuminance.size() > 0) {
-		entry->lightsDistribution = new Distribution1D(&(entry->tmpInfo->mergedLightReceivedLuminance[0]),
-				entry->tmpInfo->mergedLightReceivedLuminance.size());
-		
-		entry->distributionIndexToLightIndex = entry->tmpInfo->mergedDistributionIndexToLightIndex;
-		entry->distributionIndexToLightIndex.shrink_to_fit();
-	}
+void DirectLightSamplingCache::FinalizedMergeCacheEntry(const u_int entryIndex) {
+	const DLSCacheEntry &entry = allEntries[entryIndex];
+
+	// Copy back the temporary information
+	entry.tmpInfo->lightReceivedLuminance = entry.tmpInfo->mergedLightReceivedLuminance;
+	entry.tmpInfo->distributionIndexToLightIndex = entry.tmpInfo->mergedDistributionIndexToLightIndex;
+	
+	entry.tmpInfo->mergedLightReceivedLuminance.resize(0);
+	entry.tmpInfo->mergedDistributionIndexToLightIndex.resize(0);
 }
 
 void DirectLightSamplingCache::MergeCacheEntries(const Scene *scene) {
 	SLG_LOG("Building direct light sampling cache: merging cache entries");
+
+	// Merge near cache entry information (even multiple time to further
+	// propagate the information)
+	for (u_int pass = 0; pass < entryMergePasses; ++pass) {
+		SLG_LOG("Direct light sampling cache merged entries pass " << pass);
+
+		double lastPrintTime = WallClockTime();
+		atomic<u_int> counter(0);
+
+		#pragma omp parallel for
+		for (
+				// Visual C++ 2013 supports only OpenMP 2.5
+#if _OPENMP >= 200805
+				unsigned
+#endif
+				int i = 0; i < allEntries.size(); ++i) {
+			const int tid =
+#if defined(_OPENMP)
+				omp_get_thread_num()
+#else
+				0
+#endif
+				;
+
+			if (tid == 0) {
+				const double now = WallClockTime();
+				if (now - lastPrintTime > 2.0) {
+					SLG_LOG("Direct light sampling cache merged entries: " << counter << "/" << allEntries.size() <<" (" << (u_int)((100.0 * counter) / allEntries.size()) << "%)");
+					lastPrintTime = now;
+				}
+			}
+
+			MergeCacheEntry(scene, i);
+
+			++counter;
+		}
+
+
+		#pragma omp parallel for
+		for (
+				// Visual C++ 2013 supports only OpenMP 2.5
+#if _OPENMP >= 200805
+				unsigned
+#endif
+				int i = 0; i < allEntries.size(); ++i) {
+			FinalizedMergeCacheEntry(i);
+		}
+	}
+}
+
+//------------------------------------------------------------------------------
+// Initialize entry distributions
+//------------------------------------------------------------------------------
+
+void DirectLightSamplingCache::InitDistributionEntry(const Scene *scene, DLSCacheEntry *entry) {
+	// Initialize the distribution
+	if (entry->tmpInfo->lightReceivedLuminance.size() > 0) {
+#ifndef NDEBUG
+		for (u_int i = 0; i < entry->tmpInfo->lightReceivedLuminance.size(); ++i)
+			assert (!isnan(entry->tmpInfo->lightReceivedLuminance[i]) && !isinf(entry->tmpInfo->lightReceivedLuminance[i]));
+#endif
+
+		// Use log of the received luminance like in LOG_POWER strategy to avoid
+		// problems when there is a huge difference in light contribution like
+		// with sun and sky
+		vector<float> logReceivedLuminance(entry->tmpInfo->lightReceivedLuminance.size());
+		for (u_int i = 0; i < logReceivedLuminance.size(); ++i)
+			logReceivedLuminance[i] = logf(1.f + entry->tmpInfo->lightReceivedLuminance[i]);
+
+		entry->lightsDistribution = new Distribution1D(&(logReceivedLuminance[0]),
+				logReceivedLuminance.size());
+
+		entry->distributionIndexToLightIndex = entry->tmpInfo->distributionIndexToLightIndex;
+		entry->distributionIndexToLightIndex.shrink_to_fit();
+	}
+}
+
+void DirectLightSamplingCache::InitDistributionEntries(const Scene *scene) {
+	SLG_LOG("Building direct light sampling cache: initializing distributions");
 
 	double lastPrintTime = WallClockTime();
 	atomic<u_int> counter(0);
@@ -469,22 +677,30 @@ void DirectLightSamplingCache::MergeCacheEntries(const Scene *scene) {
 		if (tid == 0) {
 			const double now = WallClockTime();
 			if (now - lastPrintTime > 2.0) {
-				SLG_LOG("Direct light sampling cache merged entries: " << counter << "/" << allEntries.size() <<" (" << (u_int)((100.0 * counter) / allEntries.size()) << "%)");
+				SLG_LOG("Direct light sampling cache initializing distribution: " << counter << "/" << allEntries.size() <<" (" << (u_int)((100.0 * counter) / allEntries.size()) << "%)");
 				lastPrintTime = now;
 			}
 		}
 		
-		MergeCacheEntry(scene, allEntries[i]);
+		InitDistributionEntry(scene, &allEntries[i]);
 		
 		++counter;
 	}
 }
+
+//------------------------------------------------------------------------------
+// Build BVH
+//------------------------------------------------------------------------------
 
 void DirectLightSamplingCache::BuildBVH(const Scene *scene) {
 	SLG_LOG("Building direct light sampling cache: build BVH");
 
 	bvh = new DLSCBvh(allEntries, entryRadius, entryNormalAngle);
 }
+
+//------------------------------------------------------------------------------
+// Build
+//------------------------------------------------------------------------------
 
 void DirectLightSamplingCache::Build(const Scene *scene) {
 	// This check is required because FILESAVER engine doesn't
@@ -501,10 +717,11 @@ void DirectLightSamplingCache::Build(const Scene *scene) {
 	BuildCacheEntries(scene);
 	FillCacheEntries(scene);
 	MergeCacheEntries(scene);
+	InitDistributionEntries(scene);
 
 	// Delete all temporary information
-	for (auto entry : allEntries)
-		entry->DeleteTmpInfo();
+	for (auto &entry : allEntries)
+		entry.DeleteTmpInfo();
 
 	// Delete the Octree and build the BVH
 	delete octree;
@@ -535,7 +752,7 @@ void DirectLightSamplingCache::DebugExport(const string &fileName, const float s
 			Property("scene.materials.dlsc_material_red.emission")("0.25 0.0 0.0");
 
 	for (u_int i = 0; i < allEntries.size(); ++i) {
-		const DLSCacheEntry &entry = *(allEntries[i]);
+		const DLSCacheEntry &entry = allEntries[i];
 		if (entry.IsDirectLightSamplingDisabled())
 			prop << Property("scene.objects.dlsc_entry_" + ToString(i) + ".material")("dlsc_material_red");
 		else

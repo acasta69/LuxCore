@@ -31,29 +31,44 @@
 namespace slg {
 
 //------------------------------------------------------------------------------
+// DLSCachePoint
+//------------------------------------------------------------------------------
+
+class DLSCachePoint {
+public:
+	DLSCachePoint(const luxrays::Point &pnt, const luxrays::Normal &nml,
+			const PathVolumeInfo &vi) : p(pnt), n(nml) { }
+
+	luxrays::Point p;
+	luxrays::Normal n;
+
+	PathVolumeInfo volInfo;
+};
+
+//------------------------------------------------------------------------------
 // DLSCacheEntry
 //------------------------------------------------------------------------------
 
 class DLSCacheEntry {
 public:
-	DLSCacheEntry(const luxrays::Point &pnt, const luxrays::Normal &nml,
-			const bool isVol,
-			const PathVolumeInfo &vi) :
-			p(pnt), n(nml), isVolume(isVol), lightsDistribution(NULL) {
-		tmpInfo = new TemporayInformation();
-		
-		tmpInfo->volInfo = vi;
-	}
-	~DLSCacheEntry() {
-		DeleteTmpInfo();
+	DLSCacheEntry();
+    // Move constructor, takes a rvalue reference &&
+    DLSCacheEntry(DLSCacheEntry &&other);
+	~DLSCacheEntry();
 
-		delete lightsDistribution;		
-	}
+	// Move assignment, takes a rvalue reference &&
+    DLSCacheEntry &operator=(DLSCacheEntry &&other);
+	
+	void Init(const luxrays::Point &pnt, const luxrays::Normal &nml,
+			const bool isVol, const bool isTrans, const PathVolumeInfo &vi);
 	
 	bool IsDirectLightSamplingDisabled() const {
-		return (lightsDistribution == NULL);
+		return (lightsDistribution == nullptr);
 	}
-	
+
+	void AddSamplingPoint(const luxrays::Point &pnt, const luxrays::Normal &nml, 
+			const bool isTrans, const PathVolumeInfo &vi);
+
 	// Point information
 	luxrays::Point p;
 	luxrays::Normal n;
@@ -67,7 +82,8 @@ public:
 
 private:
 	typedef struct {
-		PathVolumeInfo volInfo;
+		bool isTransparent;
+		std::vector<DLSCachePoint> samplingPoints;
 
 		std::vector<float> lightReceivedLuminance;
 		std::vector<u_int> distributionIndexToLightIndex;
@@ -76,9 +92,14 @@ private:
 		std::vector<u_int> mergedDistributionIndexToLightIndex;
 	} TemporayInformation;
 
+	// Prevent copy constructor to be used
+	DLSCacheEntry(const DLSCacheEntry &);
+	// Prevent copy assignment to be used
+    DLSCacheEntry &operator=(const DLSCacheEntry &);
+
 	void DeleteTmpInfo() {
 		delete tmpInfo;
-		tmpInfo = NULL;
+		tmpInfo = nullptr;
 	}
 
 	
@@ -109,7 +130,7 @@ public:
 	u_int maxSampleCount, maxDepth, maxEntryPasses;
 	float targetCacheHitRate, lightThreshold;
 	float entryRadius, entryNormalAngle, entryConvergenceThreshold;
-	u_int entryWarmUpSamples;
+	u_int entryWarmUpSamples, entryMergePasses;
 	
 	bool entryOnVolumes;
 
@@ -122,13 +143,16 @@ private:
 	void BuildCacheEntries(const Scene *scene);
 	void FillCacheEntry(const Scene *scene, DLSCacheEntry *entry);
 	void FillCacheEntries(const Scene *scene);
-	void MergeCacheEntry(const Scene *scene, DLSCacheEntry *entry);
+	void MergeCacheEntry(const Scene *scene, const u_int entryIndex);
+	void FinalizedMergeCacheEntry(const u_int entryIndex);
 	void MergeCacheEntries(const Scene *scene);
+	void InitDistributionEntry(const Scene *scene, DLSCacheEntry *entry);
+	void InitDistributionEntries(const Scene *scene);
 	void BuildBVH(const Scene *scene);
 
 	void DebugExport(const std::string &fileName, const float sphereRadius) const;
 
-	std::vector<DLSCacheEntry *> allEntries;
+	std::vector<DLSCacheEntry> allEntries;
 
 	// Used only during the building phase
 	DLSCOctree *octree;

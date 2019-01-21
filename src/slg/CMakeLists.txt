@@ -151,6 +151,7 @@ add_library(openvdb STATIC ${OPENVDB_SRCS})
 set(SLG_KERNELS
 	${LuxRays_SOURCE_DIR}/include/slg/cameras/camera_types.cl
 	${LuxRays_SOURCE_DIR}/include/slg/cameras/camera_funcs.cl
+	${LuxRays_SOURCE_DIR}/include/slg/core/indexbvh_types.cl
 	${LuxRays_SOURCE_DIR}/include/slg/engines/pathoclbase/kernels/pathoclbase_datatypes.cl
 	${LuxRays_SOURCE_DIR}/include/slg/engines/pathoclbase/kernels/pathoclbase_funcs.cl
 	${LuxRays_SOURCE_DIR}/include/slg/engines/pathoclbase/kernels/pathoclbase_kernels_micro.cl
@@ -263,6 +264,7 @@ set(SLG_CORE_SRCS
 	${LuxRays_SOURCE_DIR}/src/slg/cameras/perspective.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/cameras/projective.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/cameras/stereo.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/core/indexbvh.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/core/sdl.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/core/sphericalfunction/sphericalfunction.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/core/sphericalfunction/photometricdataies.cpp
@@ -278,6 +280,9 @@ set(SLG_CORE_SRCS
 	${LuxRays_SOURCE_DIR}/src/slg/engines/bidirvmcpu/bidirvmcpu.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/bidirvmcpu/bidirvmcputhread.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/bidirvmcpu/hashgrid.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/photongicache.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/pgicthread.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/pgicbvh.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compiledscene.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compilecamera.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compilegeometry.cpp
@@ -462,6 +467,7 @@ file(MAKE_DIRECTORY ${generated_kernels_dir})
 PreprocessOCLKernels(${generated_kernels_dir} slg ${SLG_KERNELS})
 
 set(SLG_KERNEL_SRCS
+	${generated_kernels_dir}/indexbvh_types_kernel.cpp
 	${generated_kernels_dir}/sampler_types_kernel.cpp
 	${generated_kernels_dir}/sampler_random_funcs_kernel.cpp
 	${generated_kernels_dir}/sampler_sobol_funcs_kernel.cpp
@@ -603,6 +609,7 @@ set(SLG_FILM_SRCS
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/gaussianblur3x3.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/mist.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/nop.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/patterns.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/objectidmask.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/outputswitcher.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/vignetting.cpp

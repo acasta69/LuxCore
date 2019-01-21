@@ -271,7 +271,7 @@ void PathOCLBaseOCLRenderThread::InitLights() {
 		AllocOCLBufferRO(&dlscDistributionsBuff, &cscene->dlscDistributions[0],
 			cscene->dlscDistributions.size() * sizeof(float), "DLSC indices table");
 		AllocOCLBufferRO(&dlscBVHNodesBuff, &cscene->dlscBVHArrayNode[0],
-			cscene->dlscBVHArrayNode.size() * sizeof(slg::ocl::DLSCBVHArrayNode), "DLSC BVH nodes");
+			cscene->dlscBVHArrayNode.size() * sizeof(slg::ocl::IndexBVHArrayNode), "DLSC BVH nodes");
 	} else {
 		FreeOCLBuffer(&dlscAllEntriesBuff);
 		FreeOCLBuffer(&dlscDistributionIndexToLightIndexBuff);
@@ -447,6 +447,41 @@ void PathOCLBaseOCLRenderThread::InitSamplerSharedDataBuffer() {
 						boost::lexical_cast<string>(renderEngine->GetType()));
 		}
 	}
+}
+
+// Used only by TILEPATHOCL
+void PathOCLBaseOCLRenderThread::UpdateSamplerSharedDataBuffer(const TileWork &tileWork) {
+	if (renderEngine->oclSampler->type != slg::ocl::TILEPATHSAMPLER)
+		throw runtime_error("Wrong sampler in PathOCLBaseRenderThread::UpdateSamplerSharedDataBuffer(): " +
+						boost::lexical_cast<string>(renderEngine->oclSampler->type));
+
+	switch (renderEngine->GetType()) {
+			case TILEPATHOCL: {
+				const u_int *subRegion = renderEngine->film->GetSubRegion();
+				const u_int filmRegionPixelCount = (subRegion[1] - subRegion[0] + 1) * (subRegion[3] - subRegion[2] + 1);
+
+				// rngPass, rng0 and rng1 fields
+				vector<slg::ocl::TilePathSamplerSharedData> buffer(filmRegionPixelCount);
+
+				RandomGenerator rndGen(tileWork.GetTileSeed());
+
+				for (u_int i = 0; i < filmRegionPixelCount; ++i) {
+					buffer[i].rngPass = rndGen.uintValue();
+					buffer[i].rng0 = rndGen.floatValue();
+					buffer[i].rng1 = rndGen.floatValue();
+				}
+
+				cl::CommandQueue &oclQueue = intersectionDevice->GetOpenCLQueue();
+				oclQueue.enqueueWriteBuffer(*samplerSharedDataBuff, CL_TRUE, 0,
+						sizeof(slg::ocl::TilePathSamplerSharedData) * buffer.size(), &buffer[0]);
+				break;
+			}
+			case RTPATHOCL:
+				break;
+			default:
+				throw runtime_error("Unknown render engine in PathOCLBaseRenderThread::UpdateSamplerSharedDataBuffer(): " +
+						boost::lexical_cast<string>(renderEngine->GetType()));
+		}
 }
 
 void PathOCLBaseOCLRenderThread::InitSamplesBuffer() {

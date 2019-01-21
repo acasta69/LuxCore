@@ -70,7 +70,7 @@ public:
 	bool IsShadowCatcherOnlyInfiniteLights() const { return material->IsShadowCatcherOnlyInfiniteLights(); }
 	bool IsCameraInvisible() const;
 	bool IsVolume() const { return dynamic_cast<const Volume *>(material) != NULL; }
-	int GetSamples() const { return material->GetSamples(); }
+	bool IsPhotonGIEnabled() const { return material->IsPhotonGIEnabled(); }
 	u_int GetObjectID() const;
 	u_int GetMaterialID() const { return material->GetID(); }
 	u_int GetLightID() const { return material->GetLightID(); }
@@ -83,6 +83,7 @@ public:
 	luxrays::Spectrum GetPassThroughTransparency() const;
 	const luxrays::Frame &GetFrame() const { return frame; }
 
+	luxrays::Spectrum EvaluateTotal() const;
 	luxrays::Spectrum Evaluate(const luxrays::Vector &generatedDir,
 		BSDFEvent *event, float *directPdfW = NULL, float *reversePdfW = NULL) const;
 	luxrays::Spectrum Sample(luxrays::Vector *sampledDir,

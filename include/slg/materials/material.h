@@ -56,7 +56,7 @@ typedef enum {
 	METAL2_ANISOTROPIC, ROUGHGLASS_ANISOTROPIC
 } MaterialType;
 
-// MAterial emission direct light sampling type
+// Material emission direct light sampling type
 typedef enum {
 	DLS_ENABLED, DLS_DISABLED, DLS_AUTO
 } MaterialEmissionDLSType;
@@ -93,6 +93,9 @@ public:
 	virtual bool HasBumpTex() const { 
 		return (bumpTex != NULL);
 	}
+	
+	void SetPhotonGIEnabled(const bool v) { isPhotonGIEnabled = v; }
+	virtual bool IsPhotonGIEnabled() const;
 
 	void SetDirectLightSamplingType(const MaterialEmissionDLSType type) { directLightSamplingType = type; }
 	MaterialEmissionDLSType GetDirectLightSamplingType() const { return directLightSamplingType; }
@@ -121,10 +124,6 @@ public:
 		const float oneOverPrimitiveArea) const;
 	virtual float GetEmittedRadianceY(const float oneOverPrimitiveArea) const;
 
-	const void SetSamples(const int sampleCount) { samples = sampleCount; }
-	const int GetSamples() const { return samples; }
-	const void SetEmittedSamples(const int sampleCount) { emittedSamples = sampleCount; }
-	const int GetEmittedSamples() const { return emittedSamples; }
 	const void SetEmittedImportance(const float imp) { emittedImportance = imp; }
 	const float GetEmittedImportance() const { return emittedImportance; }
 	const Texture *GetTransparencyTexture() const { return transparencyTex; }
@@ -148,6 +147,12 @@ public:
 	
 	virtual void Bump(HitPoint *hitPoint) const;
 
+	// EvaluateTotal() returns the total reflection given an constant illumination
+	// over the hemisphere. It is currently used only by PhotonGICache.
+	//
+	// NOTE: this is called rho() in PBRT sources.
+	virtual luxrays::Spectrum EvaluateTotal(const HitPoint &hitPoint) const;
+	
 	// Evaluate() is used to evaluate the material (i.e. get a color plus some
 	// related data) knowing the eye and light vector. It used by the
 	// path tracer to evaluate the material color when doing direct lighting
@@ -196,7 +201,6 @@ protected:
 
 	MaterialEmissionDLSType directLightSamplingType;
 
-	int samples, emittedSamples;
 	float emittedImportance;
 	luxrays::Spectrum emittedGain, emittedFactor;
 	float emittedPower, emittedEfficency, emittedTheta, emittedCosThetaMax;
@@ -212,7 +216,7 @@ protected:
 	const Volume *interiorVolume, *exteriorVolume;
 
 	bool isVisibleIndirectDiffuse, isVisibleIndirectGlossy, isVisibleIndirectSpecular,
-		usePrimitiveArea, isShadowCatcher, isShadowCatcherOnlyInfiniteLights;
+		usePrimitiveArea, isShadowCatcher, isShadowCatcherOnlyInfiniteLights, isPhotonGIEnabled;
 };
 
 //------------------------------------------------------------------------------

@@ -17,12 +17,13 @@
  ***************************************************************************/
 
 #include "slg/engines/pathtracer.h"
+#include "slg/engines/caches/photongi/photongicache.h"
 
 using namespace std;
 using namespace luxrays;
 using namespace slg;
 
-PathTracer::PathTracer() : pixelFilterDistribution(NULL) {
+PathTracer::PathTracer() : pixelFilterDistribution(nullptr), photonGICache(nullptr) {
 }
 
 PathTracer::~PathTracer() {
@@ -115,7 +116,7 @@ bool PathTracer::DirectLightSampling(
 		float lightPickPdf;
 		const LightSource *light = lightStrategy->SampleLights(u0,
 				bsdf.hitPoint.p,
-				bsdf.hitPoint.intoObject ? bsdf.hitPoint.geometryN : -bsdf.hitPoint.geometryN,
+				bsdf.hitPoint.intoObject ? bsdf.hitPoint.shadeN : -bsdf.hitPoint.shadeN,
 				bsdf.IsVolume(), &lightPickPdf);
 
 		if (light) {
@@ -233,8 +234,14 @@ void PathTracer::DirectHitFiniteLight(const Scene *scene,  const PathDepthInfo &
 	if (!emittedRadiance.Black()) {
 		float weight;
 		if (!(lastBSDFEvent & SPECULAR)) {
-			const float lightPickProb = scene->lightDefs.GetIlluminateLightStrategy()->
-					SampleLightPdf(lightSource, ray.o, rayNormal, rayFromVolume);
+			const LightStrategy *lightStrategy = scene->lightDefs.GetIlluminateLightStrategy();
+			const float lightPickProb = lightStrategy->SampleLightPdf(lightSource, ray.o, rayNormal, rayFromVolume);
+
+			// This is a specific check to avoid fireflies with DLSC
+			if ((lightPickProb == 0.f) && lightSource->IsDirectLightSamplingEnabled() &&
+					(lightStrategy->GetType() == TYPE_DLS_CACHE))
+				return;
+
 			const float directPdfW = PdfAtoW(directPdfA, distance,
 					AbsDot(bsdf.hitPoint.fixedDir, bsdf.hitPoint.shadeN));
 
@@ -271,7 +278,7 @@ void PathTracer::DirectHitInfiniteLight(const Scene *scene,  const PathDepthInfo
 
 			sampleResult->AddEmission(envLight->GetID(), pathThroughput, weight * envRadiance);
 		}
-	}
+	}	
 }
 
 void PathTracer::GenerateEyeRay(const Camera *camera, const Film *film, Ray &eyeRay,
@@ -331,6 +338,8 @@ void PathTracer::RenderSample(luxrays::IntersectionDevice *device, const Scene *
 	Normal lastNormal(eyeRay.d);
 	bool lastFromVolume = false;
 
+	bool firstPhotonGICacheHit = true;
+	bool photonGICacheEnabledOnLastHit = false;
 	BSDFEvent lastBSDFEvent = SPECULAR; // SPECULAR is required to avoid MIS
 	float lastPdfW = 1.f;
 	Spectrum pathThroughput(1.f);
@@ -393,8 +402,63 @@ void PathTracer::RenderSample(luxrays::IntersectionDevice *device, const Scene *
 		}
 		sampleResult.lastPathVertex = depthInfo.IsLastPathVertex(maxPathDepth, bsdf.GetEventTypes());
 
+		//----------------------------------------------------------------------
+		// Check if I can use the photon cache
+		//----------------------------------------------------------------------
+
+		if (photonGICache) {
+			// Check if one of the debug modes is enabled
+			if (photonGICache->GetDebugType() == PhotonGIDebugType::PGIC_DEBUG_SHOWDIRECT) {
+				sampleResult.radiance[0] += photonGICache->GetDirectRadiance(bsdf);
+				break;
+			} else if (photonGICache->GetDebugType() == PhotonGIDebugType::PGIC_DEBUG_SHOWINDIRECT) {
+				sampleResult.radiance[0] += photonGICache->GetIndirectRadiance(bsdf);
+				break;
+			} else if (photonGICache->GetDebugType() == PhotonGIDebugType::PGIC_DEBUG_SHOWCAUSTIC) {
+				sampleResult.radiance[0] += photonGICache->GetCausticRadiance(bsdf);
+				break;
+			}
+
+			// Check if the cache is enabled for this material
+			if (bsdf.IsPhotonGIEnabled()) {
+				// TODO: add support for AOVs (possible ?)
+				// TODO: support for radiance groups (possible ?)
+
+				// Check if I'm in the special case where all caches are enabled. If
+				// they are I will use directly the radiance cache and stop.
+				if (photonGICache->IsDirectEnabled() && photonGICache->IsIndirectEnabled() &&
+						photonGICache->IsCausticEnabled()) {
+					// Add emitted light
+					if (bsdf.IsLightSource()) {
+						DirectHitFiniteLight(scene, depthInfo, lastBSDFEvent, pathThroughput,
+								eyeRay, lastNormal, lastFromVolume,
+								eyeRayHit.t, bsdf, lastPdfW, &sampleResult);
+					}
+
+					// Add everything else
+					sampleResult.radiance[0] += pathThroughput * photonGICache->GetAllRadiance(bsdf);
+					// I can terminate the path, all done
+					break;
+				}
+
+				if (photonGICache->IsIndirectEnabled() && photonGICacheEnabledOnLastHit) {
+					sampleResult.radiance[0] += pathThroughput * photonGICache->GetIndirectRadiance(bsdf);
+					// I can terminate the path, all done
+					break;
+				}
+
+				if (photonGICache->IsCausticEnabled() && firstPhotonGICacheHit)
+					sampleResult.radiance[0] += pathThroughput * photonGICache->GetCausticRadiance(bsdf);
+
+				firstPhotonGICacheHit = false;
+				photonGICacheEnabledOnLastHit = true;
+			} else
+				photonGICacheEnabledOnLastHit = false;
+		}
+
 		// Check if it is a light source
-		if (bsdf.IsLightSource()) {
+		if (bsdf.IsLightSource() &&
+				(!photonGICache || !photonGICache->IsCausticEnabled() || (lastBSDFEvent & SPECULAR))) {
 			DirectHitFiniteLight(scene, depthInfo, lastBSDFEvent, pathThroughput,
 					eyeRay, lastNormal, lastFromVolume,
 					eyeRayHit.t, bsdf, lastPdfW, &sampleResult);
@@ -411,16 +475,27 @@ void PathTracer::RenderSample(luxrays::IntersectionDevice *device, const Scene *
 		if (sampleResult.lastPathVertex && !sampleResult.firstPathVertex)
 			break;
 
-		const bool isLightVisible = DirectLightSampling(
-				device, scene,
-				eyeRay.time,
-				sampler->GetSample(sampleOffset + 1),
-				sampler->GetSample(sampleOffset + 2),
-				sampler->GetSample(sampleOffset + 3),
-				sampler->GetSample(sampleOffset + 4),
-				sampler->GetSample(sampleOffset + 5),
-				depthInfo, 
-				pathThroughput, bsdf, volInfo, &sampleResult);
+		bool isLightVisible;
+		if (photonGICache && photonGICache->IsDirectEnabled() &&
+				bsdf.IsPhotonGIEnabled()) {
+			// TODO: add support for AOVs (possible ?)
+			// TODO: support for radiance groups (possible ?)
+
+			const Spectrum directLightRadiance = photonGICache->GetDirectRadiance(bsdf);
+			isLightVisible = !directLightRadiance.Black();
+			sampleResult.radiance[0] += pathThroughput * directLightRadiance;
+		} else {
+			isLightVisible = DirectLightSampling(
+					device, scene,
+					eyeRay.time,
+					sampler->GetSample(sampleOffset + 1),
+					sampler->GetSample(sampleOffset + 2),
+					sampler->GetSample(sampleOffset + 3),
+					sampler->GetSample(sampleOffset + 4),
+					sampler->GetSample(sampleOffset + 5),
+					depthInfo, 
+					pathThroughput, bsdf, volInfo, &sampleResult);
+		}
 
 		if (sampleResult.lastPathVertex)
 			break;
@@ -480,7 +555,7 @@ void PathTracer::RenderSample(luxrays::IntersectionDevice *device, const Scene *
 		// first path vertex. Set or update sampleResult.irradiancePathThroughput
 		if (sampleResult.firstPathVertex) {
 			if (!(bsdf.GetEventTypes() & SPECULAR))
-				sampleResult.irradiancePathThroughput = INV_PI * fabsf(Dot(bsdf.hitPoint.shadeN, sampledDir)) / rrProb;
+				sampleResult.irradiancePathThroughput = INV_PI * AbsDot(bsdf.hitPoint.shadeN, sampledDir) / rrProb;
 			else
 				sampleResult.irradiancePathThroughput = Spectrum();
 		} else
@@ -490,7 +565,7 @@ void PathTracer::RenderSample(luxrays::IntersectionDevice *device, const Scene *
 		volInfo.Update(lastBSDFEvent, bsdf);
 
 		eyeRay.Update(bsdf.hitPoint.p, sampledDir);
-		lastNormal = bsdf.hitPoint.intoObject ? bsdf.hitPoint.geometryN : -bsdf.hitPoint.geometryN;
+		lastNormal = bsdf.hitPoint.intoObject ? bsdf.hitPoint.shadeN : -bsdf.hitPoint.shadeN;
 		lastFromVolume =  bsdf.IsVolume();
 	}
 

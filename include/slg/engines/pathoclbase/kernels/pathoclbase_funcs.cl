@@ -572,6 +572,13 @@ OPENCL_FORCE_NOT_INLINE void DirectHitFiniteLight(
 					rayFromVolume,
 #endif
 					light->lightSceneIndex);
+
+#if !defined(RENDER_ENGINE_RTPATHOCL)
+			// This is a specific check to avoid fireflies with DLSC
+			if ((lightPickProb == 0.f) && light->isDirectLightSamplingEnabled && dlscAllEntries)
+				return;
+#endif
+			
 			const float directPdfW = PdfAtoW(directPdfA, distance,
 					fabs(dot(VLOAD3F(&bsdf->hitPoint.fixedDir.x), VLOAD3F(&bsdf->hitPoint.shadeN.x))));
 
@@ -608,7 +615,7 @@ OPENCL_FORCE_NOT_INLINE bool DirectLight_Illuminate(
 	// Pick a light source to sample
 	const float3 point = VLOAD3F(&bsdf->hitPoint.p.x);
 
-	float3 normal = VLOAD3F(&bsdf->hitPoint.geometryN.x);
+	float3 normal = VLOAD3F(&bsdf->hitPoint.shadeN.x);
 	const float3 rayDir = -VLOAD3F(&bsdf->hitPoint.fixedDir.x);
 	const bool intoObject = (dot(rayDir, normal) < 0.f);
 	normal = intoObject ? normal : -normal;
@@ -854,7 +861,7 @@ OPENCL_FORCE_NOT_INLINE bool DirectLight_BSDFSampling(
 		, __global const DLSCacheEntry* restrict dlscAllEntries \
 		, __global const uint* restrict dlscDistributionIndexToLightIndex \
 		, __global const float* restrict dlscDistributions \
-		, __global const DLSCBVHArrayNode* restrict dlscBVHNodes \
+		, __global const IndexBVHArrayNode* restrict dlscBVHNodes \
 		, const float dlscRadius2 \
 		, const float dlscNormalCosAngle \
 		/* Images */ \

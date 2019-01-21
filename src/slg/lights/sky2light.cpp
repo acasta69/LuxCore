@@ -333,6 +333,8 @@ Spectrum SkyLight2::GetRadiance(const Scene &scene,
 	const Vector w = -dir;
 	float u, v, latLongMappingPdf;
 	ToLatLongMapping(w, &u, &v, &latLongMappingPdf);
+	if (latLongMappingPdf == 0.f)
+		return Spectrum();
 	
 	const float distPdf = skyDistribution->Pdf(u, v);
 	if (directPdfA)
@@ -421,7 +423,7 @@ Spectrum SkyLight2::Illuminate(const Scene &scene, const Point &p,
 	if (emissionPdfW)
 		*emissionPdfW = distPdf * latLongMappingPdf / (M_PI * envRadius * envRadius);
 
-	return ComputeRadiance(-(*dir));
+	return ComputeRadiance(*dir);
 }
 
 UV SkyLight2::GetEnvUV(const luxrays::Vector &dir) const {
