@@ -59,8 +59,9 @@ size_t PathOCLBaseOCLRenderThread::GetOpenCLHitPointSize() const {
 		hitPointSize += 2 * sizeof(Vector) + 2 * sizeof(Normal);
 	// Volume fields
 	if (renderEngine->compiledScene->HasVolumes())
-		hitPointSize += 2 * sizeof(u_int) + 2 * sizeof(u_int) +
-				sizeof(int);
+		hitPointSize += 2 * sizeof(u_int) + 2 * sizeof(u_int);
+	// intoObject
+	hitPointSize += sizeof(int);
 	// Object ID
 	if (renderEngine->compiledScene->IsTextureCompiled(OBJECTID_TEX) ||
 			renderEngine->compiledScene->IsTextureCompiled(OBJECTID_COLOR_TEX) ||
@@ -108,7 +109,7 @@ size_t PathOCLBaseOCLRenderThread::GetOpenCLSampleResultSize() const {
 		sampleResultSize += sizeof(Point);
 	if (threadFilm->HasChannel(Film::GEOMETRY_NORMAL))
 		sampleResultSize += sizeof(Normal);
-	if (threadFilm->HasChannel(Film::SHADING_NORMAL))
+	if (threadFilm->HasChannel(Film::SHADING_NORMAL) || threadFilm->HasChannel(Film::AVG_SHADING_NORMAL))
 		sampleResultSize += sizeof(Normal);
 	if (threadFilm->HasChannel(Film::MATERIAL_ID) ||
 			threadFilm->HasChannel(Film::MATERIAL_ID_MASK) ||
@@ -139,6 +140,8 @@ size_t PathOCLBaseOCLRenderThread::GetOpenCLSampleResultSize() const {
 		sampleResultSize += sizeof(Film::RAYCOUNT);
 	if (threadFilm->HasChannel(Film::IRRADIANCE))
 		sampleResultSize += 2 * sizeof(Spectrum);
+	if (threadFilm->HasChannel(Film::ALBEDO))
+		sampleResultSize += sizeof(Spectrum);
 
 	sampleResultSize += sizeof(BSDFEvent) +
 			3 * sizeof(int) +
@@ -280,6 +283,32 @@ void PathOCLBaseOCLRenderThread::InitLights() {
 	}
 }
 
+void PathOCLBaseOCLRenderThread::InitPhotonGI() {
+	CompiledScene *cscene = renderEngine->compiledScene;
+
+	if (cscene->pgicRadiancePhotons.size() > 0) {
+		AllocOCLBufferRO(&pgicRadiancePhotonsBuff, &cscene->pgicRadiancePhotons[0],
+			cscene->pgicRadiancePhotons.size() * sizeof(slg::ocl::RadiancePhoton), "PhotonGI indirect cache all entries");
+		AllocOCLBufferRO(&pgicRadiancePhotonsBVHNodesBuff, &cscene->pgicRadiancePhotonsBVHArrayNode[0],
+			cscene->pgicRadiancePhotonsBVHArrayNode.size() * sizeof(slg::ocl::IndexBVHArrayNode), "PhotonGI indirect cache BVH nodes");
+	} else {
+		FreeOCLBuffer(&pgicRadiancePhotonsBuff);
+		FreeOCLBuffer(&pgicRadiancePhotonsBVHNodesBuff);
+	}
+
+	if (cscene->pgicCausticPhotons.size() > 0) {
+		AllocOCLBufferRO(&pgicCausticPhotonsBuff, &cscene->pgicCausticPhotons[0],
+			cscene->pgicCausticPhotons.size() * sizeof(slg::ocl::Photon), "PhotonGI caustic cache all entries");
+		AllocOCLBufferRO(&pgicCausticPhotonsBVHNodesBuff, &cscene->pgicCausticPhotonsBVHArrayNode[0],
+			cscene->pgicCausticPhotonsBVHArrayNode.size() * sizeof(slg::ocl::IndexBVHArrayNode), "PhotonGI caustic cache BVH nodes");
+		AllocOCLBufferRW(&pgicCausticNearPhotonsBuff,
+			renderEngine->taskCount * cscene->pgicCausticLookUpMaxCount * sizeof(slg::ocl::NearPhoton), "PhotonGI near photon buffers");
+	} else {
+		FreeOCLBuffer(&pgicCausticPhotonsBuff);
+		FreeOCLBuffer(&pgicCausticPhotonsBVHNodesBuff);
+	}
+}
+
 void PathOCLBaseOCLRenderThread::InitImageMaps() {
 	CompiledScene *cscene = renderEngine->compiledScene;
 
@@ -336,6 +365,7 @@ void PathOCLBaseOCLRenderThread::InitGPUTaskBuffer() {
 			sizeof(slg::ocl::pathoclbase::DirectLightIlluminateInfo) + 
 			sizeof(BSDFEvent) + // lastBSDFEvent
 			sizeof(float) + // lastPdfW
+			sizeof(float) + // lastGlossiness
 			sizeof(Normal) + // lastNormal
 			(renderEngine->compiledScene->HasVolumes() ? sizeof(int) : 0) + // lastIsVolume
 			sizeof(int); // isLightVisible
@@ -354,7 +384,10 @@ void PathOCLBaseOCLRenderThread::InitGPUTaskBuffer() {
 	size_t gpuTaksStateSize =
 			sizeof(int) + // state
 			sizeof(slg::ocl::pathoclbase::PathDepthInfo) + // depthInfo
-			sizeof(Spectrum);
+			sizeof(Spectrum) + // throughput
+			sizeof(int) + // albedoToDo
+			sizeof(int) + // photonGICausticCacheAlreadyUsed
+			sizeof(int); // photonGICacheEnabledOnLastHit
 	// Add seedPassThroughEvent memory size
 	if (hasPassThrough)
 		gpuTaksStateSize += sizeof(ocl::Seed);
@@ -628,6 +661,12 @@ void PathOCLBaseOCLRenderThread::InitRender() {
 	//--------------------------------------------------------------------------
 
 	InitLights();
+
+	//--------------------------------------------------------------------------
+	// Light definitions
+	//--------------------------------------------------------------------------
+
+	InitPhotonGI();
 
 	//--------------------------------------------------------------------------
 	// GPUTaskStats

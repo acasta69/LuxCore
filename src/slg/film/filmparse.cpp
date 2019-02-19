@@ -44,6 +44,7 @@
 #include "slg/film/imagepipeline/plugins/coloraberration.h"
 #include "slg/film/imagepipeline/plugins/premultiplyalpha.h"
 #include "slg/film/imagepipeline/plugins/mist.h"
+#include "slg/film/imagepipeline/plugins/intel_oidn.h"
 
 using namespace std;
 using namespace luxrays;
@@ -363,6 +364,18 @@ void Film::ParseOutputs(const Properties &props) {
 				filmOutputs.Add(FilmOutputs::MATERIAL_ID_COLOR, fileName);
 				break;
 			}
+			case FilmOutputs::ALBEDO: {
+				if (!initialized)
+					AddChannel(Film::ALBEDO);
+				filmOutputs.Add(FilmOutputs::ALBEDO, fileName);
+				break;
+			}
+			case FilmOutputs::AVG_SHADING_NORMAL: {
+				if (!initialized)
+					AddChannel(Film::AVG_SHADING_NORMAL);
+				filmOutputs.Add(FilmOutputs::AVG_SHADING_NORMAL, fileName);
+				break;
+			}
 			default:
 				throw runtime_error("Unknown type in film output: " + type);
 		}
@@ -587,6 +600,8 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 			} else if (type == "PATTERNS") {
 				const u_int type = props.Get(Property(prefix + ".index")(0)).Get<u_int>();
 				imagePipeline->AddPlugin(new PatternsPlugin(type));
+			} else if (type == "INTEL_OIDN") {
+				imagePipeline->AddPlugin(new IntelOIDN());
 			} else
 				throw runtime_error("Unknown image pipeline plugin type: " + type);
 		}

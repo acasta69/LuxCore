@@ -29,10 +29,25 @@ using namespace slg;
 // LuxRender carpaint material porting.
 //------------------------------------------------------------------------------
 
+CarPaintMaterial::CarPaintMaterial(const Texture *transp, const Texture *emitted, const Texture *bump,
+			const Texture *kd, const Texture *ks1, const Texture *ks2, const Texture *ks3, const Texture *m1, const Texture *m2, const Texture *m3,
+			const Texture *r1, const Texture *r2, const Texture *r3, const Texture *ka, const Texture *d) :
+			Material(transp, emitted, bump), Kd(kd), Ks1(ks1), Ks2(ks2), Ks3(ks3), M1(m1), M2(m2), M3(m3),
+			R1(r1), R2(r2), R3(r3),	Ka(ka), depth(d) {
+	const float glossinessM1 = M1 ? M1->Filter() : 1.f;
+	const float glossinessM2 = M2 ? M2->Filter() : 1.f;
+	const float glossinessM3 = M3 ? M3->Filter() : 1.f;
+
+	glossiness = Min(Min(glossinessM1, glossinessM2), glossinessM3);
+}
+
+Spectrum CarPaintMaterial::Albedo(const HitPoint &hitPoint) const {
+	return Kd->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
+}
+
 Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
-	float *directPdfW, float *reversePdfW) const
-{
+	float *directPdfW, float *reversePdfW) const {
 	Vector H = Normalize(localLightDir + localEyeDir);
 	if (H == Vector(0.f))
 	{
@@ -111,8 +126,7 @@ Spectrum CarPaintMaterial::Evaluate(const HitPoint &hitPoint,
 Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 	const Vector &localFixedDir, Vector *localSampledDir,
 	const float u0, const float u1, const float passThroughEvent,
-	float *pdfW, float *absCosSampledDir, BSDFEvent *event) const
-{
+	float *pdfW, float *absCosSampledDir, BSDFEvent *event) const {
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
@@ -320,8 +334,7 @@ Spectrum CarPaintMaterial::Sample(const HitPoint &hitPoint,
 
 void CarPaintMaterial::Pdf(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir,
-	float *directPdfW, float *reversePdfW) const
-{
+	float *directPdfW, float *reversePdfW) const {
 	Vector H = Normalize(localLightDir + localEyeDir);
 	if (H == Vector(0.f))
 	{

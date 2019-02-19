@@ -46,9 +46,9 @@ if(NOT APPLE)
 	find_package(PythonLibs 3.4)
 endif()
 
-find_program(PYSIDE_UIC NAME pyside-uic
+find_program(PYSIDE_UIC NAMES pyside-uic pyside2-uic
 		HINTS "${PYTHON_INCLUDE_DIRS}/../Scripts"
-		PATHS "c:/Program Files/Python35/Scripts")
+		PATHS "c:/Program Files/Python${PYTHON_V}/Scripts")
 
 
 include_directories(${PYTHON_INCLUDE_DIRS})
@@ -109,6 +109,14 @@ find_package(Embree REQUIRED)
 
 if (EMBREE_FOUND)
 	include_directories(BEFORE SYSTEM ${EMBREE_INCLUDE_PATH})
+endif ()
+
+# Intel Oidn
+set(OIDN_ROOT                "${OIDN_SEARCH_PATH}")
+find_package(Oidn REQUIRED)
+
+if (OIDN_FOUND)
+	include_directories(BEFORE SYSTEM ${ODIN_INCLUDE_PATH})
 endif ()
 
 # Intel TBB

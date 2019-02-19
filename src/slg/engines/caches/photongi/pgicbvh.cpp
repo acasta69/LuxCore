@@ -46,15 +46,15 @@ void PGICPhotonBvh::GetAllNearEntries(vector<NearPhoton> &entries,
 	maxDistance2 = entryRadius2;
 
 	u_int currentNode = 0; // Root Node
-	const u_int stopNode = BVHNodeData_GetSkipIndex(arrayNodes[0].nodeData); // Non-existent
+	const u_int stopNode = IndexBVHNodeData_GetSkipIndex(arrayNodes[0].nodeData); // Non-existent
 
 	while (currentNode < stopNode) {
-		const IndexBVHArrayNode &node = arrayNodes[currentNode];
+		const slg::ocl::IndexBVHArrayNode &node = arrayNodes[currentNode];
 
 		const u_int nodeData = node.nodeData;
-		if (BVHNodeData_IsLeaf(nodeData)) {
+		if (IndexBVHNodeData_IsLeaf(nodeData)) {
 			// It is a leaf, check the entry
-			const Photon *entry = &allEntries[node.entryLeaf.index];
+			const Photon *entry = &allEntries[node.entryLeaf.entryIndex];
 
 			const float distance2 = DistanceSquared(p, entry->p);
 			if ((distance2 < maxDistance2) &&
@@ -95,7 +95,7 @@ void PGICPhotonBvh::GetAllNearEntries(vector<NearPhoton> &entries,
 					p.z >= node.bvhNode.bboxMin[2] && p.z <= node.bvhNode.bboxMax[2])
 				++currentNode;
 			else {
-				// I don't need to use BVHNodeData_GetSkipIndex() here because
+				// I don't need to use IndexBVHNodeData_GetSkipIndex() here because
 				// I already know the leaf flag is 0
 				currentNode = nodeData;
 			}
@@ -108,9 +108,8 @@ void PGICPhotonBvh::GetAllNearEntries(vector<NearPhoton> &entries,
 //------------------------------------------------------------------------------
 
 PGICRadiancePhotonBvh::PGICRadiancePhotonBvh(const vector<RadiancePhoton> &entries,
-		 const u_int maxLookUpCount, const float radius, const float normalAngle) :
-		IndexBvh(entries, radius), entryMaxLookUpCount(maxLookUpCount),
-		entryNormalCosAngle(cosf(Radians(normalAngle))) {
+		const float radius, const float normalAngle) :
+		IndexBvh(entries, radius), entryNormalCosAngle(cosf(Radians(normalAngle))) {
 }
 
 PGICRadiancePhotonBvh::~PGICRadiancePhotonBvh() {
@@ -118,23 +117,22 @@ PGICRadiancePhotonBvh::~PGICRadiancePhotonBvh() {
 
 const RadiancePhoton *PGICRadiancePhotonBvh::GetNearestEntry(const Point &p, const Normal &n) const {
 	const RadiancePhoton *nearestEntry = nullptr;
-	float nearestDistance2 = numeric_limits<float>::infinity();
+	float nearestDistance2 = entryRadius2;
 
 	u_int currentNode = 0; // Root Node
 	const u_int stopNode = BVHNodeData_GetSkipIndex(arrayNodes[0].nodeData); // Non-existent
 
 	while (currentNode < stopNode) {
-		const IndexBVHArrayNode &node = arrayNodes[currentNode];
+		const slg::ocl::IndexBVHArrayNode &node = arrayNodes[currentNode];
 
 		const u_int nodeData = node.nodeData;
 		if (BVHNodeData_IsLeaf(nodeData)) {
 			// It is a leaf, check the entry
-			const RadiancePhoton *entry = &allEntries[node.entryLeaf.index];
+			const RadiancePhoton *entry = &allEntries[node.entryLeaf.entryIndex];
 
 			const float distance2 = DistanceSquared(p, entry->p);
 			if ((distance2 < nearestDistance2) &&
-					(Dot(n, entry->n) > entryNormalCosAngle) &&
-					(distance2 < entryRadius2)) {
+					(Dot(n, entry->n) > entryNormalCosAngle)) {
 				// I have found a valid nearer entry
 				nearestEntry = entry;
 				nearestDistance2 = distance2;
@@ -148,7 +146,7 @@ const RadiancePhoton *PGICRadiancePhotonBvh::GetNearestEntry(const Point &p, con
 					p.z >= node.bvhNode.bboxMin[2] && p.z <= node.bvhNode.bboxMax[2])
 				++currentNode;
 			else {
-				// I don't need to use BVHNodeData_GetSkipIndex() here because
+				// I don't need to use IndexBVHNodeData_GetSkipIndex() here because
 				// I already know the leaf flag is 0
 				currentNode = nodeData;
 			}
@@ -156,66 +154,4 @@ const RadiancePhoton *PGICRadiancePhotonBvh::GetNearestEntry(const Point &p, con
 	}
 
 	return nearestEntry;
-}
-
-void PGICRadiancePhotonBvh::GetAllNearEntries(vector<NearPhoton> &entries,
-		const Point &p, const Normal &n, float &maxDistance2) const {
-	maxDistance2 = entryRadius2;
-
-	u_int currentNode = 0; // Root Node
-	const u_int stopNode = BVHNodeData_GetSkipIndex(arrayNodes[0].nodeData); // Non-existent
-
-	while (currentNode < stopNode) {
-		const IndexBVHArrayNode &node = arrayNodes[currentNode];
-
-		const u_int nodeData = node.nodeData;
-		if (BVHNodeData_IsLeaf(nodeData)) {
-			// It is a leaf, check the entry
-			const RadiancePhoton *entry = &allEntries[node.entryLeaf.index];
-
-			const float distance2 = DistanceSquared(p, entry->p);
-			if ((distance2 < maxDistance2) &&
-					(Dot(n, entry->n) > entryNormalCosAngle)) {
-				// I have found a valid entry
-				
-				NearPhoton nearPhoton(entry, distance2);
-
-				if (entries.size() < entryMaxLookUpCount) {
-					// Just add the entry
-					entries.push_back(nearPhoton);
-
-					// Check if the array is now full and sort the entries for
-					// the next addition
-					if (entries.size() == entryMaxLookUpCount)
-						make_heap(&entries[0], &entries[entryMaxLookUpCount]);
-				} else {
-					// Check if the new entry is nearer than the farthest array entry
-					if (distance2 < entries[0].distance2) {
-						// Remove the farthest array entry
-						pop_heap(&entries[0], &entries[entryMaxLookUpCount]);
-
-						// Add the new entry
-						entries[entryMaxLookUpCount - 1] = nearPhoton;
-						push_heap(&entries[0], &entries[entryMaxLookUpCount]);
-
-						// Update max. squared distance
-						maxDistance2 = entries[0].distance2;
-					}
-				}
-			}
-
-			++currentNode;
-		} else {
-			// It is a node, check the bounding box
-			if (p.x >= node.bvhNode.bboxMin[0] && p.x <= node.bvhNode.bboxMax[0] &&
-					p.y >= node.bvhNode.bboxMin[1] && p.y <= node.bvhNode.bboxMax[1] &&
-					p.z >= node.bvhNode.bboxMin[2] && p.z <= node.bvhNode.bboxMax[2])
-				++currentNode;
-			else {
-				// I don't need to use BVHNodeData_GetSkipIndex() here because
-				// I already know the leaf flag is 0
-				currentNode = nodeData;
-			}
-		}
-	}
 }

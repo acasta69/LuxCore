@@ -21,7 +21,7 @@
 
 #include <vector>
 #include <boost/atomic.hpp>
-#include <boost/thread.hpp>
+#include <boost/thread/mutex.hpp>
 
 #include "luxrays/utils/properties.h"
 #include "luxrays/utils/utils.h"
@@ -29,9 +29,16 @@
 #include "slg/slg.h"
 #include "slg/samplers/sobol.h"
 #include "slg/bsdf/bsdf.h"
-#include "slg/engines/caches/photongi/pcgibvh.h"
+#include "slg/scene/scene.h"
+#include "slg/engines/caches/photongi/pgicbvh.h"
+#include "slg/engines/caches/photongi/pgickdtree.h"
 
 namespace slg {
+
+// OpenCL data types
+namespace ocl {
+#include "slg/engines/caches/photongi/pgic_types.cl"
+}
 
 //------------------------------------------------------------------------------
 // Photon Mapping Based GI cache
@@ -44,7 +51,17 @@ struct GenericPhoton {
 	luxrays::Point p;
 };
 
-	
+struct VisibilityParticle : GenericPhoton {
+	VisibilityParticle(const luxrays::Point &pt, const luxrays::Normal &nm,
+			const luxrays::Spectrum& bsdfEvalTotal) : GenericPhoton(pt), n(nm),
+			bsdfEvaluateTotal(bsdfEvalTotal) {
+	}
+
+	luxrays::Normal n;
+	luxrays::Spectrum bsdfEvaluateTotal;
+	luxrays::Spectrum alphaAccumulated;
+};
+
 struct Photon : GenericPhoton {
 	Photon(const luxrays::Point &pt, const luxrays::Vector &dir,
 		const luxrays::Spectrum &a, const luxrays::Normal &n) : GenericPhoton(pt), d(dir),
@@ -80,69 +97,82 @@ struct NearPhoton {
 };
 
 //------------------------------------------------------------------------------
-// TracePhotonsThread
-//------------------------------------------------------------------------------
-
-class PhotonGICache;
-
-class TracePhotonsThread {
-public:
-	TracePhotonsThread(PhotonGICache &pgic, const u_int index);
-	virtual ~TracePhotonsThread();
-
-	void Start();
-	void Join();
-
-	std::vector<Photon> directPhotons, indirectPhotons, causticPhotons;
-	std::vector<RadiancePhoton> radiancePhotons;
-
-	friend class PhotonGICache;
-
-private:
-	void ConnectToEye(const float time, const float u0, const LightSource &light,
-			const BSDF &bsdf, const luxrays::Point &lensPoint, const luxrays::Spectrum &flux,
-			PathVolumeInfo volInfo, std::vector<SampleResult> &sampleResults);
-	SampleResult &AddResult(std::vector<SampleResult> &sampleResults, const bool fromLight) const;
-
-	void RenderFunc();
-
-	PhotonGICache &pgic;
-	const u_int threadIndex;
-
-	boost::thread *renderThread;
-};
-
-//------------------------------------------------------------------------------
 // PhotonGICache
 //------------------------------------------------------------------------------
 
 typedef enum {
-	PGIC_DEBUG_SHOWDIRECT, PGIC_DEBUG_SHOWINDIRECT, PGIC_DEBUG_SHOWCAUSTIC, PGIC_DEBUG_NONE
+	PGIC_DEBUG_NONE, PGIC_DEBUG_SHOWINDIRECT, PGIC_DEBUG_SHOWCAUSTIC
 } PhotonGIDebugType;
+
+typedef enum {
+	PGIC_SAMPLER_RANDOM, PGIC_SAMPLER_METROPOLIS
+} PhotonGISamplerType;
+
+typedef struct {
+	PhotonGISamplerType samplerType;
+
+	struct {
+		u_int maxTracedCount, maxPathDepth;
+	} photon;
+
+	struct {
+		float targetHitRate;
+		u_int maxSampleCount;
+		float lookUpRadius, lookUpRadius2, lookUpNormalAngle, lookUpNormalCosAngle;
+	} visibility;
+
+	struct {
+		bool enabled;
+		u_int maxSize;
+		float lookUpRadius, lookUpRadius2, lookUpNormalAngle,
+				glossinessUsageThreshold, usageThresholdScale,
+				filterRadiusScale;
+	} indirect;
+
+	struct {
+		bool enabled;
+		u_int maxSize;
+		u_int lookUpMaxCount;
+		float lookUpRadius, lookUpRadius2, lookUpNormalAngle;
+	} caustic;
+
+	PhotonGIDebugType debugType;
+} PhotonGICacheParams;
+
+class TracePhotonsThread;
+class TraceVisibilityThread;
 
 class PhotonGICache {
 public:
-	PhotonGICache(const Scene *scn, const u_int maxPhotonTracedCount, const u_int maxPathDepth,
-			const u_int entryMaxLookUpCount, const float entryRadius, const float entryNormalAngle,
-			const bool directEnabled, u_int const maxDirectSize,
-			const bool indirectEnabled, u_int const maxIndirectSize,
-			const bool causticEnabled, u_int const maxCausticSize,
-			const PhotonGIDebugType debugType);
+	PhotonGICache(const Scene *scn, const PhotonGICacheParams &params);
 	virtual ~PhotonGICache();
 
-	PhotonGIDebugType GetDebugType() const { return debugType; }
+	PhotonGIDebugType GetDebugType() const { return params.debugType; }
 	
-	bool IsDirectEnabled() const { return directEnabled; }
-	bool IsIndirectEnabled() const { return indirectEnabled; }
-	bool IsCausticEnabled() const { return causticEnabled; }
+	bool IsIndirectEnabled() const { return params.indirect.enabled; }
+	bool IsCausticEnabled() const { return params.caustic.enabled; }
+	bool IsPhotonGIEnabled(const BSDF &bsdf) const;
+	float GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent,
+			const float lastGlossiness) const;
+	bool IsDirectLightHitVisible(const bool causticCacheAlreadyUsed) const;
 	
+	const PhotonGICacheParams &GetParams() const { return params; }
+
 	void Preprocess();
 
-	luxrays::Spectrum GetAllRadiance(const BSDF &bsdf) const;
-	luxrays::Spectrum GetDirectRadiance(const BSDF &bsdf) const;
 	luxrays::Spectrum GetIndirectRadiance(const BSDF &bsdf) const;
 	luxrays::Spectrum GetCausticRadiance(const BSDF &bsdf) const;
+	
+	const std::vector<Photon> &GetCausticPhotons() const { return causticPhotons; }
+	const PGICPhotonBvh *GetCausticPhotonsBVH() const { return causticPhotonsBVH; }
+	const u_int GetCausticPhotonTracedCount() const { return causticPhotonTracedCount; }
 
+	const std::vector<RadiancePhoton> &GetRadiancePhotons() const { return radiancePhotons; }
+	const PGICRadiancePhotonBvh *GetRadiancePhotonsBVH() const { return radiancePhotonsBVH; }
+	const u_int GetRadiancePhotonTracedCount() const { return indirectPhotonTracedCount; }
+
+	static PhotonGISamplerType String2SamplerType(const std::string &type);
+	static std::string SamplerType2String(const PhotonGISamplerType type);
 	static PhotonGIDebugType String2DebugType(const std::string &type);
 	static std::string DebugType2String(const PhotonGIDebugType type);
 
@@ -151,36 +181,40 @@ public:
 	static PhotonGICache *FromProperties(const Scene *scn, const luxrays::Properties &cfg);
 
 	friend class TracePhotonsThread;
+	friend class TraceVisibilityThread;
 
 private:
-	void TracePhotons(std::vector<Photon> &directPhotons, std::vector<Photon> &indirectPhotons,
-			std::vector<Photon> &causticPhotons);
+	void TraceVisibilityParticles();
+	void TracePhotons();
 	void AddOutgoingRadiance(RadiancePhoton &radiacePhoton, const PGICPhotonBvh *photonsBVH,
 			const u_int photonTracedCount) const;
 	void FillRadiancePhotonData(RadiancePhoton &radiacePhoton);
-	void FillRadiancePhotonsData();
+	void CreateRadiancePhotons();
 	luxrays::Spectrum ProcessCacheEntries(const std::vector<NearPhoton> &entries,
 			const u_int photonTracedCount, const float maxDistance2, const BSDF &bsdf) const;
 
 	const Scene *scene;
-	
-	const u_int maxPhotonTracedCount, maxPathDepth;
-	const u_int entryMaxLookUpCount;
-	const float entryRadius, entryRadius2, entryNormalAngle;
-	const bool directEnabled, indirectEnabled, causticEnabled;
-	const u_int maxDirectSize, maxIndirectSize, maxCausticSize;
-	const PhotonGIDebugType debugType;
-	
-	boost::atomic<u_int> globalPhotonsCounter, globalDirectPhotonsTraced,
+	PhotonGICacheParams params;
+
+	boost::atomic<u_int> globalPhotonsCounter,
 		globalIndirectPhotonsTraced, globalCausticPhotonsTraced,
-		globalDirectSize, globalIndirectSize, globalCausticSize;
-	SobolSamplerSharedData samplerSharedData;
+		globalIndirectSize, globalCausticSize;
+	SamplerSharedData *samplerSharedData;
 
-	u_int directPhotonTracedCount, indirectPhotonTracedCount, causticPhotonTracedCount;
+	u_int indirectPhotonTracedCount, causticPhotonTracedCount;
 
-	// Photon maps
-	std::vector<Photon> directPhotons, indirectPhotons, causticPhotons;
-	PGICPhotonBvh *directPhotonsBVH, *indirectPhotonsBVH, *causticPhotonsBVH;
+	// Visibility map
+	SobolSamplerSharedData visibilitySobolSharedData;
+	boost::atomic<u_int> globalVisibilityParticlesCount;
+	u_int visibilityCacheLookUp, visibilityCacheHits;
+	bool visibilityWarmUp;
+
+	std::vector<VisibilityParticle> visibilityParticles;
+	PGICKdTree *visibilityParticlesKdTree;
+
+	// Caustic photon maps
+	std::vector<Photon> causticPhotons;
+	PGICPhotonBvh *causticPhotonsBVH;
 	
 	// Radiance photon map
 	std::vector<RadiancePhoton> radiancePhotons;

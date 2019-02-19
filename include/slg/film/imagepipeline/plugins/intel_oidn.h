@@ -16,61 +16,47 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
-#ifndef _SLG_PGICBVH_H
-#define	_SLG_PGICBVH_H
+#ifndef _SLG_INTEL_OIDN_H
+#define	_SLG_INTEL_OIDN_H
 
 #include <vector>
 
-#include "slg/slg.h"
-#include "slg/core/indexbvh.h"
+#include <boost/serialization/export.hpp>
+
+#include <OpenImageDenoise/oidn.hpp>
+
+#include "luxrays/luxrays.h"
+#include "luxrays/core/color/color.h"
+#include "slg/film/film.h"
+#include "slg/film/imagepipeline/imagepipeline.h"
 
 namespace slg {
 
 //------------------------------------------------------------------------------
-// PGICPhotonBvh
+//Intel Open Image Denoise
 //------------------------------------------------------------------------------
 
-class Photon;
-class NearPhoton;
-
-class PGICPhotonBvh : public IndexBvh<Photon> {
+class IntelOIDN : public ImagePipelinePlugin {
 public:
-	PGICPhotonBvh(const std::vector<Photon> &entries, const u_int entryMaxLookUpCount,
-			const float radius, const float normalAngle);
-	virtual ~PGICPhotonBvh();
+	IntelOIDN();
 
-	void GetAllNearEntries(std::vector<NearPhoton> &entries,
-			const luxrays::Point &p, const luxrays::Normal &n,
-			float &maxDistance2) const;
+	virtual ImagePipelinePlugin *Copy() const;
+
+	virtual void Apply(Film &film, const u_int index);
+
+	friend class boost::serialization::access;
 
 private:
-	const u_int entryMaxLookUpCount;
-	float entryNormalCosAngle;
-};
-
-//------------------------------------------------------------------------------
-// PGICRadiancePhotonBvh
-//------------------------------------------------------------------------------
-
-class RadiancePhoton;
-
-class PGICRadiancePhotonBvh : public IndexBvh<RadiancePhoton> {
-public:
-	PGICRadiancePhotonBvh(const std::vector<RadiancePhoton> &entries, const u_int entryMaxLookUpCount,
-			const float radius, const float normalAngle);
-	virtual ~PGICRadiancePhotonBvh();
-
-	const RadiancePhoton *GetNearestEntry(const luxrays::Point &p, const luxrays::Normal &n) const;
-
-	void GetAllNearEntries(std::vector<NearPhoton> &entries,
-			const luxrays::Point &p, const luxrays::Normal &n,
-			float &maxDistance2) const;
-
-private:
-	const u_int entryMaxLookUpCount;
-	float entryNormalCosAngle;
+	template<class Archive> void serialize(Archive &ar, const u_int version) {
+		ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(ImagePipelinePlugin);
+	}
 };
 
 }
 
-#endif	/* _SLG_PGICBVH_H */
+
+BOOST_CLASS_VERSION(slg::IntelOIDN, 1)
+
+BOOST_CLASS_EXPORT_KEY(slg::IntelOIDN)
+
+#endif /* _SLG_INTEL_OIDN_H */

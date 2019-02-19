@@ -40,6 +40,7 @@ Material::Material(const Texture *transp, const Texture *emitted, const Texture 
 		transparencyTex(transp), emittedTex(emitted), bumpTex(bump), bumpSampleDistance(.001f),
 		emissionMap(NULL), emissionFunc(NULL),
 		interiorVolume(NULL), exteriorVolume(NULL),
+		glossiness(0.f),
 		isVisibleIndirectDiffuse(true), isVisibleIndirectGlossy(true), isVisibleIndirectSpecular(true),
 		isShadowCatcher(false), isShadowCatcherOnlyInfiniteLights(false), isPhotonGIEnabled(true) {
 	SetEmittedTheta(90.f);
@@ -48,17 +49,6 @@ Material::Material(const Texture *transp, const Texture *emitted, const Texture 
 
 Material::~Material() {
 	delete emissionFunc;
-}
-
-bool Material::IsPhotonGIEnabled() const {
-	const BSDFEvent eventTypes = GetEventTypes();
-	
-	if ((eventTypes == (DIFFUSE | REFLECT)) ||
-			(eventTypes == (GLOSSY | REFLECT)) ||
-			(eventTypes == (DIFFUSE | GLOSSY | REFLECT))) {
-		return isPhotonGIEnabled;
-	} else
-		return false;
 }
 
 void Material::SetEmittedTheta(const float theta) {
@@ -118,6 +108,10 @@ void Material::Bump(HitPoint *hitPoint) const {
 		hitPoint->dpdu = Cross(hitPoint->shadeN, Cross(hitPoint->dpdu, hitPoint->shadeN));
 		hitPoint->dpdv = Cross(hitPoint->shadeN, Cross(hitPoint->dpdv, hitPoint->shadeN));
 	}
+}
+
+Spectrum Material::Albedo(const HitPoint &hitPoint) const {
+	return Spectrum(1.f);
 }
 
 Spectrum Material::EvaluateTotal(const HitPoint &hitPoint) const {

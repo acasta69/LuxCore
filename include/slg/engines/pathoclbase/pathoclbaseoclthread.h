@@ -111,6 +111,8 @@ protected:
 		cl::Buffer *channel_SAMPLECOUNT_Buff;
 		cl::Buffer *channel_CONVERGENCE_Buff;
 		cl::Buffer *channel_MATERIAL_ID_COLOR_Buff;
+		cl::Buffer *channel_ALBEDO_Buff;
+		cl::Buffer *channel_AVG_SHADING_NORMAL_Buff;
 		
 		// Denoiser sample accumulator buffers
 		cl::Buffer *denoiser_NbOfSamplesImage_Buff;
@@ -161,6 +163,7 @@ protected:
 	void InitMaterials();
 	void InitSceneObjects();
 	void InitLights();
+	void InitPhotonGI();
 	void InitKernels();
 	void InitGPUTaskBuffer();
 	void InitSamplerSharedDataBuffer();
@@ -231,6 +234,11 @@ protected:
 	cl::Buffer *pathVolInfosBuff;
 	cl::Buffer *directLightVolInfosBuff;
 	cl::Buffer *pixelFilterBuff;
+	cl::Buffer *pgicRadiancePhotonsBuff;
+	cl::Buffer *pgicRadiancePhotonsBVHNodesBuff;
+	cl::Buffer *pgicCausticPhotonsBuff;
+	cl::Buffer *pgicCausticPhotonsBVHNodesBuff;
+	cl::Buffer *pgicCausticNearPhotonsBuff;
 
 	u_int initKernelArgsCount;
 	std::string kernelsParameters;

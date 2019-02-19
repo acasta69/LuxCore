@@ -69,6 +69,23 @@ OPENCL_FORCE_INLINE bool Material_IsDelta(const uint matIndex
 }
 
 //------------------------------------------------------------------------------
+// Material_Albedo
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE float3 Material_Albedo(const uint matIndex,
+		__global HitPoint *hitPoint
+		MATERIALS_PARAM_DECL) {
+	__global const Material *material = &mats[matIndex];
+
+	if (Material_IsDynamic(material))
+		return Material_AlbedoWithDynamic(matIndex, hitPoint
+			MATERIALS_PARAM);
+	else
+		return Material_AlbedoWithoutDynamic(material, hitPoint
+			MATERIALS_PARAM);
+}
+
+//------------------------------------------------------------------------------
 // Material_Evaluate
 //------------------------------------------------------------------------------
 
@@ -253,3 +270,21 @@ OPENCL_FORCE_INLINE void Material_Bump(const uint matIndex, __global HitPoint *h
 	}
 }
 #endif
+
+//------------------------------------------------------------------------------
+// Material_GetGlossiness
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE float Material_GetGlossiness(const uint matIndex
+		MATERIALS_PARAM_DECL) {
+	return mats[matIndex].glossiness;
+}
+
+//------------------------------------------------------------------------------
+// Material_GetGlossiness
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE float Material_IsPhotonGIEnabled(const uint matIndex
+		MATERIALS_PARAM_DECL) {
+	return mats[matIndex].isPhotonGIEnabled;
+}

@@ -1,4 +1,4 @@
-#line 2 "dlsc_types.cl"
+#line 2 "indexbvh_types.cl"
 
 /***************************************************************************
  * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
@@ -34,3 +34,6 @@ typedef struct {
 	unsigned int nodeData;
 	int pad; // To align to float4
 } IndexBVHArrayNode;
+
+#define IndexBVHNodeData_IsLeaf(nodeData) ((nodeData) & 0x80000000u)
+#define IndexBVHNodeData_GetSkipIndex(nodeData) ((nodeData) & 0x7fffffffu)

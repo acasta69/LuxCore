@@ -70,12 +70,15 @@ public:
 	bool IsShadowCatcherOnlyInfiniteLights() const { return material->IsShadowCatcherOnlyInfiniteLights(); }
 	bool IsCameraInvisible() const;
 	bool IsVolume() const { return dynamic_cast<const Volume *>(material) != NULL; }
-	bool IsPhotonGIEnabled() const { return material->IsPhotonGIEnabled(); }
+	bool IsPhotonGIEnabled() const { return (!IsVolume() && material->IsPhotonGIEnabled()); }
+	bool IsAlbedoEndPoint() const;
 	u_int GetObjectID() const;
 	u_int GetMaterialID() const { return material->GetID(); }
 	u_int GetLightID() const { return material->GetLightID(); }
 	const Volume *GetMaterialInteriorVolume() const { return material->GetInteriorVolume(hitPoint, hitPoint.passThroughEvent); }
 	const Volume *GetMaterialExteriorVolume() const { return material->GetExteriorVolume(hitPoint, hitPoint.passThroughEvent); }
+	float GetGlossiness() const { return material->GetGlossiness(); }
+
 
 	BSDFEvent GetEventTypes() const { return material->GetEventTypes(); }
 	MaterialType GetMaterialType() const { return material->GetType(); }
@@ -83,6 +86,7 @@ public:
 	luxrays::Spectrum GetPassThroughTransparency() const;
 	const luxrays::Frame &GetFrame() const { return frame; }
 
+	luxrays::Spectrum Albedo() const;
 	luxrays::Spectrum EvaluateTotal() const;
 	luxrays::Spectrum Evaluate(const luxrays::Vector &generatedDir,
 		BSDFEvent *event, float *directPdfW = NULL, float *reversePdfW = NULL) const;

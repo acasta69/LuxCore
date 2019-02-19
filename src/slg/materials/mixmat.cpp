@@ -56,6 +56,9 @@ void MixMaterial::Preprocess() {
 	// Cache values for performance with very large material node trees
 
 	eventTypes = GetEventTypesImpl();
+
+	glossiness = Min(matA->GetGlossiness(), matB->GetGlossiness());
+
 	isLightSource = IsLightSourceImpl();
 	hasBumpTex = HasBumpTexImpl();
 	isDelta = IsDeltaImpl();
@@ -130,6 +133,13 @@ Spectrum MixMaterial::GetEmittedRadiance(const HitPoint &hitPoint, const float o
 
 		return result;
 	}
+}
+
+Spectrum MixMaterial::Albedo(const HitPoint &hitPoint) const {
+	const float weight2 = Clamp(mixFactor->GetFloatValue(hitPoint), 0.f, 1.f);
+	const float weight1 = 1.f - weight2;
+
+	return weight1 * matA->Albedo(hitPoint) + weight2 * matB->Albedo(hitPoint);
 }
 
 Spectrum MixMaterial::Evaluate(const HitPoint &hitPoint,

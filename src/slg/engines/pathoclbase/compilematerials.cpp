@@ -189,8 +189,10 @@ void CompiledScene::CompileMaterials() {
 		mat->interiorVolumeIndex = interiorVol ? scene->matDefs.GetMaterialIndex(interiorVol) : NULL_INDEX;
 		const Material *exteriorVol = m->GetExteriorVolume();
 		mat->exteriorVolumeIndex = exteriorVol ? scene->matDefs.GetMaterialIndex(exteriorVol) : NULL_INDEX;
+		mat->glossiness = m->GetGlossiness();
 		mat->isShadowCatcher = m->IsShadowCatcher();
 		mat->isShadowCatcherOnlyInfiniteLights = m->IsShadowCatcherOnlyInfiniteLights();
+		mat->isPhotonGIEnabled = m->IsPhotonGIEnabled();
 
 		// Material specific parameters
 		usedMaterialTypes.insert(m->GetType());
@@ -688,6 +690,12 @@ string CompiledScene::GetMaterialsEvaluationSourceCode() const {
 	AddMaterialSourceSwitch(source, mats, "IsDeltaWithDynamic", "IsDelta", "bool", "true",
 			"const uint index MATERIALS_PARAM_DECL",
 			"mat MATERIALS_PARAM");
+
+	// Generate the code for generic Material_AlbedoWithDynamic()
+	AddMaterialSourceSwitch(source, mats, "AlbedoWithDynamic", "Albedo", "float3", "BLACK",
+			"const uint index, "
+				"__global HitPoint *hitPoint MATERIALS_PARAM_DECL",
+			"mat, hitPoint MATERIALS_PARAM");
 
 	// Generate the code for generic Material_EvaluateWithDynamic()
 	AddMaterialSourceSwitch(source, mats, "EvaluateWithDynamic", "Evaluate", "float3", "BLACK",

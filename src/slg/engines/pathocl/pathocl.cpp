@@ -36,6 +36,7 @@
 #include "slg/slg.h"
 #include "slg/engines/pathocl/pathocl.h"
 #include "slg/engines/pathocl/pathoclrenderstate.h"
+#include "slg/engines/caches/photongi/photongicache.h"
 #include "slg/kernels/kernels.h"
 #include "slg/renderconfig.h"
 #include "slg/film/filters/box.h"
@@ -95,7 +96,7 @@ void PathOCLRenderEngine::StartLockLess() {
 	UpdateTaskCount();
 
 	//--------------------------------------------------------------------------
-	// Initialize the PathTracer class with rendering parameters
+	// Initialize rendering parameters
 	//--------------------------------------------------------------------------	
 	
 	usePixelAtomics = cfg.Get(Property("pathocl.pixelatomics.enable")(false)).Get<bool>();
@@ -133,16 +134,15 @@ void PathOCLRenderEngine::StartLockLess() {
 		samplerSharedData = renderConfig->AllocSamplerSharedData(&seedBaseGenerator, film);
 
 	//--------------------------------------------------------------------------
-	// Initialize the PathTracer class with rendering parameters
-	//--------------------------------------------------------------------------
 
-	pathTracer.ParseOptions(cfg, GetDefaultProps());
-
+	// Initialize the PathTracer class
 	pathTracer.InitPixelFilterDistribution(pixelFilter);
 
-	//--------------------------------------------------------------------------
-
 	PathOCLBaseRenderEngine::StartLockLess();
+
+	// Set pathTracer PhotonGI. photonGICache is eventually initialized
+	// inside PathOCLBaseRenderEngine::StartLockLess()
+	pathTracer.SetPhotonGICache(photonGICache);
 }
 
 void PathOCLRenderEngine::StopLockLess() {
@@ -152,6 +152,9 @@ void PathOCLRenderEngine::StopLockLess() {
 
 	delete samplerSharedData;
 	samplerSharedData = NULL;
+
+	delete photonGICache;
+	photonGICache = nullptr;
 }
 
 void PathOCLRenderEngine::MergeThreadFilms() {
@@ -238,7 +241,8 @@ Properties PathOCLRenderEngine::ToProperties(const Properties &cfg) {
 			PathTracer::ToProperties(cfg) <<
 			cfg.Get(GetDefaultProps().Get("pathocl.pixelatomics.enable")) <<
 			cfg.Get(GetDefaultProps().Get("opencl.task.count")) <<
-			Sampler::ToProperties(cfg);
+			Sampler::ToProperties(cfg) <<
+			PhotonGICache::ToProperties(cfg);
 
 	return props;
 }
@@ -253,7 +257,8 @@ const Properties &PathOCLRenderEngine::GetDefaultProps() {
 			Property("renderengine.type")(GetObjectTag()) <<
 			PathTracer::GetDefaultProps() <<
 			Property("pathocl.pixelatomics.enable")(false) <<
-			Property("opencl.task.count")("AUTO");
+			Property("opencl.task.count")("AUTO") <<
+			PhotonGICache::GetDefaultProps();
 
 	return props;
 }

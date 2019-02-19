@@ -95,7 +95,8 @@ public:
 	}
 	
 	void SetPhotonGIEnabled(const bool v) { isPhotonGIEnabled = v; }
-	virtual bool IsPhotonGIEnabled() const;
+	virtual bool IsPhotonGIEnabled() const { return isPhotonGIEnabled; }
+	virtual float GetGlossiness() const { return glossiness; }
 
 	void SetDirectLightSamplingType(const MaterialEmissionDLSType type) { directLightSamplingType = type; }
 	MaterialEmissionDLSType GetDirectLightSamplingType() const { return directLightSamplingType; }
@@ -146,6 +147,9 @@ public:
 	const Volume *GetExteriorVolume() const { return exteriorVolume; }	
 	
 	virtual void Bump(HitPoint *hitPoint) const;
+
+	// Albedo() returns the material albedo. It is used for Albedo AOV.
+	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
 
 	// EvaluateTotal() returns the total reflection given an constant illumination
 	// over the hemisphere. It is currently used only by PhotonGICache.
@@ -215,6 +219,7 @@ protected:
 
 	const Volume *interiorVolume, *exteriorVolume;
 
+	float glossiness;
 	bool isVisibleIndirectDiffuse, isVisibleIndirectGlossy, isVisibleIndirectSpecular,
 		usePrimitiveArea, isShadowCatcher, isShadowCatcherOnlyInfiniteLights, isPhotonGIEnabled;
 };

@@ -141,9 +141,22 @@ __kernel __attribute__((work_group_size_hint(64, 1, 1))) void AdvancePaths_MK_HI
 	// Nothing was hit, add environmental lights radiance
 
 #if defined(PARAM_HAS_ENVLIGHTS)
-#if defined(PARAM_FORCE_BLACK_BACKGROUND)
-	if (!sample->result.passThroughPath)
+#if defined(PARAM_FORCE_BLACK_BACKGROUND) || defined(PARAM_PGIC_ENABLED)
+	if (
 #endif
+#if defined(PARAM_FORCE_BLACK_BACKGROUND)
+		(!sample->result.passThroughPath)
+#if defined(PARAM_PGIC_ENABLED)
+			&&
+#endif
+#endif
+#if defined(PARAM_PGIC_ENABLED)
+			PhotonGICache_IsDirectLightHitVisible(taskState->photonGICausticCacheAlreadyUsed)
+#endif
+#if defined(PARAM_FORCE_BLACK_BACKGROUND) || defined(PARAM_PGIC_ENABLED)
+			)
+#endif
+			
 		DirectHitInfiniteLight(
 				&taskState->depthInfo,
 				taskDirectLight->lastBSDFEvent,
@@ -170,14 +183,14 @@ __kernel __attribute__((work_group_size_hint(64, 1, 1))) void AdvancePaths_MK_HI
 		sample->result.position.z = INFINITY;
 #endif
 #if defined(PARAM_FILM_CHANNELS_HAS_GEOMETRY_NORMAL)
-		sample->result.geometryNormal.x = INFINITY;
-		sample->result.geometryNormal.y = INFINITY;
-		sample->result.geometryNormal.z = INFINITY;
+		sample->result.geometryNormal.x = 0.f;
+		sample->result.geometryNormal.y = 0.f;
+		sample->result.geometryNormal.z = 0.f;
 #endif
-#if defined(PARAM_FILM_CHANNELS_HAS_SHADING_NORMAL)
-		sample->result.shadingNormal.x = INFINITY;
-		sample->result.shadingNormal.y = INFINITY;
-		sample->result.shadingNormal.z = INFINITY;
+#if defined(PARAM_FILM_CHANNELS_HAS_SHADING_NORMAL) || defined(PARAM_FILM_CHANNELS_HAS_AVG_SHADING_NORMAL)
+		sample->result.shadingNormal.x = 0.f;
+		sample->result.shadingNormal.y = 0.f;
+		sample->result.shadingNormal.z = 0.f;
 #endif
 #if defined(PARAM_FILM_CHANNELS_HAS_MATERIAL_ID) || defined(PARAM_FILM_CHANNELS_HAS_BY_MATERIAL_ID) || defined(PARAM_FILM_CHANNELS_HAS_MATERIAL_ID_MASK) || defined(PARAM_FILM_CHANNELS_HAS_MATERIAL_ID_COLOR)
 		sample->result.materialID = NULL_INDEX;
@@ -218,12 +231,25 @@ __kernel __attribute__((work_group_size_hint(64, 1, 1))) void AdvancePaths_MK_HI
 
 	__global BSDF *bsdf = &taskState->bsdf;
 	__global Sample *sample = &samples[gid];
+	__global GPUTaskDirectLight *taskDirectLight = &tasksDirectLight[gid];
+
+	// Initialize image maps page pointer table
+	INIT_IMAGEMAPS_PAGES
 
 	//--------------------------------------------------------------------------
 	// End of variables setup
 	//--------------------------------------------------------------------------
 
 	// Something was hit
+
+	if (taskState->albedoToDo && BSDF_IsAlbedoEndPoint(bsdf MATERIALS_PARAM)) {
+#if defined(PARAM_FILM_CHANNELS_HAS_ALBEDO)
+		const float3 albedo = VLOAD3F(taskState->throughput.c) * BSDF_Albedo(bsdf
+				MATERIALS_PARAM);
+		VSTORE3F(albedo, sample->result.albedo.c);
+#endif
+		taskState->albedoToDo = false;
+	}
 
 	if (taskState->depthInfo.depth == 0) {
 #if defined(PARAM_FILM_CHANNELS_HAS_ALPHA)
@@ -238,13 +264,10 @@ __kernel __attribute__((work_group_size_hint(64, 1, 1))) void AdvancePaths_MK_HI
 #if defined(PARAM_FILM_CHANNELS_HAS_GEOMETRY_NORMAL)
 		sample->result.geometryNormal = bsdf->hitPoint.geometryN;
 #endif
-#if defined(PARAM_FILM_CHANNELS_HAS_SHADING_NORMAL)
+#if defined(PARAM_FILM_CHANNELS_HAS_SHADING_NORMAL) || defined(PARAM_FILM_CHANNELS_HAS_AVG_SHADING_NORMAL)
 		sample->result.shadingNormal = bsdf->hitPoint.shadeN;
 #endif
 #if defined(PARAM_FILM_CHANNELS_HAS_MATERIAL_ID) || defined(PARAM_FILM_CHANNELS_HAS_BY_MATERIAL_ID) || defined(PARAM_FILM_CHANNELS_HAS_MATERIAL_ID_MASK) || defined(PARAM_FILM_CHANNELS_HAS_MATERIAL_ID_COLOR)
-		// Initialize image maps page pointer table
-		INIT_IMAGEMAPS_PAGES
-
 		sample->result.materialID = BSDF_GetMaterialID(bsdf
 				MATERIALS_PARAM);
 #endif
@@ -257,12 +280,11 @@ __kernel __attribute__((work_group_size_hint(64, 1, 1))) void AdvancePaths_MK_HI
 	}
 
 	// Check if it is a light source (note: I can hit only triangle area light sources)
-	if (BSDF_IsLightSource(bsdf)) {
-		__global GPUTaskDirectLight *taskDirectLight = &tasksDirectLight[gid];
-
-		// Initialize image maps page pointer table
-		INIT_IMAGEMAPS_PAGES
-
+	if (BSDF_IsLightSource(bsdf)
+#if defined(PARAM_PGIC_ENABLED)
+			&& PhotonGICache_IsDirectLightHitVisible(taskState->photonGICausticCacheAlreadyUsed)
+#endif
+			) {
 		DirectHitFiniteLight(
 				&taskState->depthInfo,
 				taskDirectLight->lastBSDFEvent,
@@ -276,6 +298,85 @@ __kernel __attribute__((work_group_size_hint(64, 1, 1))) void AdvancePaths_MK_HI
 				LIGHTS_PARAM);
 	}
 
+	//----------------------------------------------------------------------
+	// Check if I can use the photon cache
+	//----------------------------------------------------------------------
+
+#if defined(PARAM_PGIC_ENABLED)
+	const bool isPhotonGIEnabled = PhotonGICache_IsPhotonGIEnabled(bsdf, pgicIndirectGlossinessUsageThreshold
+			MATERIALS_PARAM);
+
+#if defined(PARAM_PGIC_DEBUG_SHOWINDIRECT)
+
+	if (isPhotonGIEnabled) {
+		const float3 radiance = PhotonGICache_GetIndirectRadiance(bsdf,
+				pgicRadiancePhotons, pgicRadiancePhotonsBVHNodes,
+				pgicIndirectLookUpRadius * pgicIndirectLookUpRadius, pgicIndirectLookUpNormalCosAngle);
+		VADD3F(sample->result.radiancePerPixelNormalized[0].c, radiance);
+	}
+	taskState->state = MK_SPLAT_SAMPLE;
+	return;
+
+#elif defined(PARAM_PGIC_DEBUG_SHOWCAUSTIC)
+
+	if (isPhotonGIEnabled) {
+		const float3 radiance = PhotonGICache_GetCausticRadiance(bsdf,
+				pgicCausticPhotons, pgicCausticPhotonsBVHNodes,
+				&pgicCausticNearPhotons[gid * pgicCausticLookUpMaxCount],
+				pgicCausticPhotonTracedCount, pgicCausticLookUpRadius * pgicCausticLookUpRadius,
+				pgicCausticLookUpNormalCosAngle, pgicCausticLookUpMaxCount
+				MATERIALS_PARAM);
+
+		VADD3F(sample->result.radiancePerPixelNormalized[0].c, VLOAD3F(taskState->throughput.c) * radiance);
+	}
+	taskState->state = MK_SPLAT_SAMPLE;
+	return;
+
+#else
+
+	if (isPhotonGIEnabled) {
+#if defined(PARAM_PGIC_INDIRECT_ENABLED)
+		if (taskState->photonGICacheEnabledOnLastHit &&
+				(rayHits[gid].t > PhotonGICache_GetIndirectUsageThreshold(
+					taskDirectLight->lastBSDFEvent,
+					taskDirectLight->lastGlossiness,
+					pgicIndirectGlossinessUsageThreshold,
+					pgicIndirectUsageThresholdScale,
+					pgicIndirectLookUpRadius))) {
+			const float3 radiance = PhotonGICache_GetIndirectRadiance(bsdf,
+				pgicRadiancePhotons, pgicRadiancePhotonsBVHNodes,
+				pgicIndirectLookUpRadius * pgicIndirectLookUpRadius, pgicIndirectLookUpNormalCosAngle);
+
+			VADD3F(sample->result.radiancePerPixelNormalized[0].c, VLOAD3F(taskState->throughput.c) * radiance);
+
+			// I can terminate the path, all done
+			taskState->state = MK_SPLAT_SAMPLE;
+			return;
+		}
+#endif
+
+#if defined(PARAM_PGIC_CAUSTIC_ENABLED)
+		if (!taskState->photonGICausticCacheAlreadyUsed) {
+			const float3 radiance = PhotonGICache_GetCausticRadiance(bsdf,
+					pgicCausticPhotons, pgicCausticPhotonsBVHNodes,
+					&pgicCausticNearPhotons[gid * pgicCausticLookUpMaxCount],
+					pgicCausticPhotonTracedCount, pgicCausticLookUpRadius * pgicCausticLookUpRadius,
+					pgicCausticLookUpNormalCosAngle, pgicCausticLookUpMaxCount
+					MATERIALS_PARAM);
+
+			VADD3F(sample->result.radiancePerPixelNormalized[0].c, VLOAD3F(taskState->throughput.c) * radiance);
+		}
+#endif
+
+		taskState->photonGICausticCacheAlreadyUsed = true;
+		taskState->photonGICacheEnabledOnLastHit = true;
+	}
+
+#endif
+
+#endif
+
+	//----------------------------------------------------------------------
 	// Check if this is the last path vertex (but not also the first)
 	//
 	// I handle as a special case when the path vertex is both the first
@@ -685,6 +786,8 @@ __kernel __attribute__((work_group_size_hint(64, 1, 1))) void AdvancePaths_MK_GE
 
 		tasksDirectLight[gid].lastBSDFEvent = event;
 		tasksDirectLight[gid].lastPdfW = lastPdfW;
+		tasksDirectLight[gid].lastGlossiness = BSDF_GetGlossiness(bsdf
+				MATERIALS_PARAM);
 
 		float3 lastNormal = VLOAD3F(&bsdf->hitPoint.shadeN.x);
 		const bool intoObject = (dot(-VLOAD3F(&bsdf->hitPoint.fixedDir.x), lastNormal) < 0.f);

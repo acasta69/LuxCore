@@ -90,7 +90,8 @@ void FilmOutputWindow::RefreshTexture() {
 		case Film::OUTPUT_RADIANCE_GROUP:
 		case Film::OUTPUT_BY_MATERIAL_ID:
 		case Film::OUTPUT_IRRADIANCE:
-		case Film::OUTPUT_BY_OBJECT_ID: {
+		case Film::OUTPUT_BY_OBJECT_ID:
+		case Film::OUTPUT_AVG_SHADING_NORMAL: {
 			app->session->GetFilm().GetOutput<float>(type, pixels.get(), index);
 			UpdateStats(pixels.get(), filmWidth, filmHeight);
 			AutoLinearToneMap(pixels.get(), pixels.get(), filmWidth, filmHeight);
@@ -106,6 +107,8 @@ void FilmOutputWindow::RefreshTexture() {
 			AutoLinearToneMap(pixels.get(), pixels.get(), filmWidth, filmHeight);
 			break;
 		}
+		case Film::OUTPUT_MATERIAL_ID_COLOR:
+		case Film::OUTPUT_ALBEDO:
 		case Film::OUTPUT_RGB_IMAGEPIPELINE: {
 			app->session->GetFilm().GetOutput<float>(type, pixels.get(), index);
 			UpdateStats(pixels.get(), filmWidth, filmHeight);
@@ -127,7 +130,6 @@ void FilmOutputWindow::RefreshTexture() {
 		case Film::OUTPUT_INDIRECT_SHADOW_MASK:
 		case Film::OUTPUT_RAYCOUNT:
 		case Film::OUTPUT_OBJECT_ID_MASK:
-		case Film::OUTPUT_SAMPLECOUNT:
 		case Film::OUTPUT_CONVERGENCE: {
 			unique_ptr<float[]> filmPixels;
 			filmPixels.reset(new float[app->session->GetFilm().GetOutputSize(type)]);
@@ -149,6 +151,16 @@ void FilmOutputWindow::RefreshTexture() {
 			AutoLinearToneMap(pixels.get(), pixels.get(), filmWidth, filmHeight);
 			break;
 		}
+		case Film::OUTPUT_SAMPLECOUNT: {
+			unique_ptr<unsigned int> filmPixels;
+			filmPixels.reset(new unsigned int[app->session->GetFilm().GetOutputSize(type)]);
+			app->session->GetFilm().GetOutput<unsigned int>(type, filmPixels.get(), index);
+
+			Copy1UINT2FLOAT(filmPixels.get(), pixels.get(), filmWidth, filmHeight);
+			UpdateStats(pixels.get(), filmWidth, filmHeight);
+			AutoLinearToneMap(pixels.get(), pixels.get(), filmWidth, filmHeight);
+			break;
+		}
 		case Film::OUTPUT_UV: {
 			unique_ptr<float[]> filmPixels;
 			filmPixels.reset(new float[app->session->GetFilm().GetOutputSize(type)]);
@@ -157,11 +169,6 @@ void FilmOutputWindow::RefreshTexture() {
 			Copy2(filmPixels.get(), pixels.get(), filmWidth, filmHeight);
 			UpdateStats(pixels.get(), filmWidth, filmHeight);
 			AutoLinearToneMap(pixels.get(), pixels.get(), filmWidth, filmHeight);
-			break;
-		}
-		case Film::OUTPUT_MATERIAL_ID_COLOR: {
-			app->session->GetFilm().GetOutput<float>(type, pixels.get(), index);
-			UpdateStats(pixels.get(), filmWidth, filmHeight);
 			break;
 		}
 		default:
@@ -211,6 +218,8 @@ FilmOutputsWindow::FilmOutputsWindow(LuxCoreApp *a) : ObjectEditorWindow(a, "Fil
 		.Add("CONVERGENCE", 28)
 		//OUTPUT_SERIALIZED_FILM = 29
 		.Add("MATERIAL_ID_COLOR", 30)
+		.Add("ALBEDO", 31)
+		.Add("AVG_SHADING_NORMAL", 32)
 		.SetDefault("RGB");
 
 	newType = 0;
@@ -336,7 +345,8 @@ bool FilmOutputsWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 				(tag == "BY_OBJECT_ID") ||
 				(tag == "SAMPLECOUNT") ||
 				(tag == "CONVERGENCE") ||
-				(tag == "MATERIAL_ID_COLOR")) {
+				(tag == "MATERIAL_ID_COLOR") ||
+				(tag == "ALBEDO")) {
 			ImGui::Combo("File name", &newFileType, "EXR\0HDR\0PNG\0JPG\0\0");
 			imageExt = imageExts[newFileType];
 		} else if ((tag == "MATERIAL_ID") ||
@@ -593,6 +603,13 @@ bool FilmOutputsWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 		if (count)
 			LuxCoreApp::ColoredLabelText("CHANNEL_MATERIAL_ID_COLOR:", "%d", count);
 
+		count = film.GetChannelCount(Film::CHANNEL_ALBEDO);
+		if (count)
+			LuxCoreApp::ColoredLabelText("CHANNEL_ALBEDO:", "%d", count);
+
+		count = film.GetChannelCount(Film::CHANNEL_AVG_SHADING_NORMAL);
+		if (count)
+			LuxCoreApp::ColoredLabelText("CHANNEL_AVG_SHADING_NORMAL:", "%d", count);
 	}
 
 	return false;

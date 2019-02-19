@@ -152,6 +152,8 @@ set(SLG_KERNELS
 	${LuxRays_SOURCE_DIR}/include/slg/cameras/camera_types.cl
 	${LuxRays_SOURCE_DIR}/include/slg/cameras/camera_funcs.cl
 	${LuxRays_SOURCE_DIR}/include/slg/core/indexbvh_types.cl
+	${LuxRays_SOURCE_DIR}/include/slg/engines/caches/photongi/pgic_types.cl
+	${LuxRays_SOURCE_DIR}/include/slg/engines/caches/photongi/pgic_funcs.cl
 	${LuxRays_SOURCE_DIR}/include/slg/engines/pathoclbase/kernels/pathoclbase_datatypes.cl
 	${LuxRays_SOURCE_DIR}/include/slg/engines/pathoclbase/kernels/pathoclbase_funcs.cl
 	${LuxRays_SOURCE_DIR}/include/slg/engines/pathoclbase/kernels/pathoclbase_kernels_micro.cl
@@ -265,6 +267,8 @@ set(SLG_CORE_SRCS
 	${LuxRays_SOURCE_DIR}/src/slg/cameras/projective.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/cameras/stereo.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/core/indexbvh.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/core/indexkdtree.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/core/indexoctree.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/core/sdl.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/core/sphericalfunction/sphericalfunction.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/core/sphericalfunction/photometricdataies.cpp
@@ -280,15 +284,19 @@ set(SLG_CORE_SRCS
 	${LuxRays_SOURCE_DIR}/src/slg/engines/bidirvmcpu/bidirvmcpu.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/bidirvmcpu/bidirvmcputhread.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/bidirvmcpu/hashgrid.cpp
-	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/photongicache.cpp
-	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/pgicthread.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/pgicbvh.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/pgickdtree.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/pgicoctree.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/tracephotonsthread.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/tracevisibilitythread.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/caches/photongi/photongicache.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compiledscene.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compilecamera.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compilegeometry.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compileimagemaps.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compilelights.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compilematerials.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compilephotongi.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compilesceneobjects.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/compiletextures.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/engines/pathoclbase/pathoclbase.cpp
@@ -556,6 +564,8 @@ set(SLG_KERNEL_SRCS
 	${generated_kernels_dir}/mapping_types_kernel.cpp
 	${generated_kernels_dir}/mapping_funcs_kernel.cpp
 	${generated_kernels_dir}/hitpoint_types_kernel.cpp
+	${generated_kernels_dir}/pgic_types_kernel.cpp
+	${generated_kernels_dir}/pgic_funcs_kernel.cpp
 	${generated_kernels_dir}/pathoclbase_datatypes_kernel.cpp
 	${generated_kernels_dir}/pathoclbase_funcs_kernel.cpp
 	${generated_kernels_dir}/pathoclbase_kernels_micro_kernel.cpp
@@ -619,6 +629,7 @@ set(SLG_FILM_SRCS
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/tonemaps/luxlinear.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/tonemaps/reinhard02.cpp
 	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/tonemaps/tonemap.cpp
+	${LuxRays_SOURCE_DIR}/src/slg/film/imagepipeline/plugins/intel_oidn.cpp
 )
 SOURCE_GROUP("Source Files\\SLG Film Library" FILES ${SLG_FILM_SRCS})
 

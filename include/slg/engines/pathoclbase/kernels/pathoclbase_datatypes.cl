@@ -92,6 +92,8 @@ typedef struct {
 #if defined(PARAM_HAS_PASSTHROUGH)
 	Seed seedPassThroughEvent;
 #endif
+	
+	int albedoToDo, photonGICausticCacheAlreadyUsed, photonGICacheEnabledOnLastHit;
 } GPUTaskState;
 
 typedef struct {
@@ -99,7 +101,7 @@ typedef struct {
 	DirectLightIlluminateInfo illumInfo;
 
 	BSDFEvent lastBSDFEvent;
-	float lastPdfW;
+	float lastPdfW, lastGlossiness;
 
 	Normal lastNormal;
 #if defined(PARAM_HAS_VOLUMES)

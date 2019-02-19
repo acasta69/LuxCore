@@ -191,6 +191,10 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 		ssParams << " -D PARAM_FILM_CHANNELS_HAS_CONVERGENCE";
 	if (threadFilm->HasChannel(Film::MATERIAL_ID_COLOR))
 		ssParams << " -D PARAM_FILM_CHANNELS_HAS_MATERIAL_ID_COLOR";
+	if (threadFilm->HasChannel(Film::ALBEDO))
+		ssParams << " -D PARAM_FILM_CHANNELS_HAS_ALBEDO";
+	if (threadFilm->HasChannel(Film::AVG_SHADING_NORMAL))
+		ssParams << " -D PARAM_FILM_CHANNELS_HAS_AVG_SHADING_NORMAL";
 
 	if (threadFilm->GetDenoiser().IsEnabled())
 		ssParams << " -D PARAM_FILM_DENOISER";
@@ -565,6 +569,30 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			throw runtime_error("Unknown sampler type in PathOCLBaseRenderThread::AdditionalKernelOptions(): " + boost::lexical_cast<string>(sampler->type));
 	}
 
+	if (cscene->photonGICache) {
+		ssParams << " -D PARAM_PGIC_ENABLED";
+
+		switch (cscene->pgicDebugType) {
+			case PGIC_DEBUG_NONE:
+				ssParams << " -D PARAM_PGIC_DEBUG_NONE";
+				break;
+			case PGIC_DEBUG_SHOWINDIRECT:
+				ssParams << " -D PARAM_PGIC_DEBUG_SHOWINDIRECT";
+				break;
+			case PGIC_DEBUG_SHOWCAUSTIC:
+				ssParams << " -D PARAM_PGIC_DEBUG_SHOWCAUSTIC";
+				break;
+			default:
+				break;
+		}
+
+		if (cscene->photonGICache->GetParams().indirect.enabled)
+			ssParams << " -D PARAM_PGIC_INDIRECT_ENABLED";
+
+		if (cscene->photonGICache->GetParams().caustic.enabled)
+			ssParams << " -D PARAM_PGIC_CAUSTIC_ENABLED";
+	}
+
 	ssParams << AdditionalKernelOptions();
 
 	//--------------------------------------------------------------------------
@@ -662,6 +690,7 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			slg::ocl::KernelSource_indexbvh_types <<
 			slg::ocl::KernelSource_dlsc_types <<
 			slg::ocl::KernelSource_sceneobject_types <<
+			slg::ocl::KernelSource_pgic_types <<
 			// OpenCL SLG Funcs
 			slg::ocl::KernelSource_mapping_funcs <<
 			slg::ocl::KernelSource_imagemap_types <<
@@ -737,6 +766,7 @@ void PathOCLBaseOCLRenderThread::InitKernels() {
 			slg::ocl::KernelSource_sampler_tilepath_funcs <<
 			slg::ocl::KernelSource_bsdf_funcs <<
 			slg::ocl::KernelSource_scene_funcs <<
+			slg::ocl::KernelSource_pgic_funcs <<
 			// PathOCL Funcs
 			slg::ocl::KernelSource_pathoclbase_datatypes <<
 			slg::ocl::KernelSource_pathoclbase_funcs <<
@@ -916,6 +946,24 @@ void PathOCLBaseOCLRenderThread::SetAdvancePathsKernelArgs(cl::Kernel *advancePa
 
 		for (u_int i = 0; i < imageMapsBuff.size(); ++i)
 			advancePathsKernel->setArg(argIndex++, sizeof(cl::Buffer), (imageMapsBuff[i]));
+	}
+
+	// PhotonGI cache
+	if (cscene->photonGICache) {
+		advancePathsKernel->setArg(argIndex++, sizeof(cl::Buffer), pgicRadiancePhotonsBuff);
+		advancePathsKernel->setArg(argIndex++, sizeof(cl::Buffer), pgicRadiancePhotonsBVHNodesBuff);
+		advancePathsKernel->setArg(argIndex++, cscene->pgicIndirectLookUpRadius);
+		advancePathsKernel->setArg(argIndex++, cscene->pgicIndirectLookUpNormalCosAngle);
+		advancePathsKernel->setArg(argIndex++, cscene->pgicIndirectGlossinessUsageThreshold);
+		advancePathsKernel->setArg(argIndex++, cscene->pgicIndirectUsageThresholdScale);
+
+		advancePathsKernel->setArg(argIndex++, sizeof(cl::Buffer), pgicCausticPhotonsBuff);
+		advancePathsKernel->setArg(argIndex++, sizeof(cl::Buffer), pgicCausticPhotonsBVHNodesBuff);
+		advancePathsKernel->setArg(argIndex++, sizeof(cl::Buffer), pgicCausticNearPhotonsBuff);
+		advancePathsKernel->setArg(argIndex++, cscene->pgicCausticPhotonTracedCount);
+		advancePathsKernel->setArg(argIndex++, cscene->pgicCausticLookUpRadius);
+		advancePathsKernel->setArg(argIndex++, cscene->pgicCausticLookUpNormalCosAngle);
+		advancePathsKernel->setArg(argIndex++, cscene->pgicCausticLookUpMaxCount);
 	}
 }
 

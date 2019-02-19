@@ -18,6 +18,7 @@
 
 #include "slg/bsdf/bsdf.h"
 #include "slg/scene/scene.h"
+#include "slg/materials/glass.h"
 
 using namespace luxrays;
 using namespace slg;
@@ -118,12 +119,24 @@ void BSDF::Init(const bool fixedFromLight, const Scene &scene, const luxrays::Ra
 	frame.SetFromZ(hitPoint.shadeN);
 }
 
+bool BSDF::IsAlbedoEndPoint() const {
+	return !IsDelta() ||
+			// This is a very special case to not have white Albedo AOV if the
+			// material is mirror. Mirror has no ray split so it can be render
+			// without any noise.
+			(material->GetType() != MIRROR);
+}
+
 bool BSDF::IsCameraInvisible() const {
 	return (sceneObject) ? sceneObject->IsCameraInvisible() : false;
 }
 
 u_int BSDF::GetObjectID() const {
 	return (sceneObject) ? sceneObject->GetID() : std::numeric_limits<u_int>::max();
+}
+
+Spectrum BSDF::Albedo() const {
+	return material->Albedo(hitPoint);
 }
 
 Spectrum BSDF::EvaluateTotal() const {

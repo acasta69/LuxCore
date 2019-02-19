@@ -45,8 +45,10 @@ SampleResult &BiDirCPURenderThread::AddResult(vector<SampleResult> &sampleResult
 	sampleResult.Init(
 			fromLight ?
 				Film::RADIANCE_PER_SCREEN_NORMALIZED :
-				(Film::RADIANCE_PER_PIXEL_NORMALIZED | Film::ALPHA |
-				Film::DEPTH | Film::SAMPLECOUNT | Film::CONVERGENCE),
+				(Film::RADIANCE_PER_PIXEL_NORMALIZED | Film::ALPHA | Film::DEPTH |
+				Film::POSITION | Film::GEOMETRY_NORMAL | Film::SHADING_NORMAL | Film::MATERIAL_ID |
+				Film::UV | Film::OBJECT_ID | Film::SAMPLECOUNT | Film::CONVERGENCE |
+				Film::MATERIAL_ID_COLOR | Film::ALBEDO | Film::AVG_SHADING_NORMAL),
 			engine->film->GetRadianceGroupCount());
 
 	return sampleResult;
@@ -604,6 +606,7 @@ void BiDirCPURenderThread::RenderFunc() {
 			eyeVertex.dVM = 0.f;
 
 			eyeVertex.depth = 1;
+			bool albedoToDo = true;
 			while (eyeVertex.depth <= engine->maxEyePathDepth) {
 				eyeSampleResult.firstPathVertex = (eyeVertex.depth == 1);
 				eyeSampleResult.lastPathVertex = (eyeVertex.depth == engine->maxEyePathDepth);
@@ -633,15 +636,38 @@ void BiDirCPURenderThread::RenderFunc() {
 					if (eyeSampleResult.firstPathVertex) {
 						eyeSampleResult.alpha = 0.f;
 						eyeSampleResult.depth = std::numeric_limits<float>::infinity();
+						eyeSampleResult.position = Point(
+								std::numeric_limits<float>::infinity(),
+								std::numeric_limits<float>::infinity(),
+								std::numeric_limits<float>::infinity());
+						eyeSampleResult.geometryNormal = Normal();
+						eyeSampleResult.shadingNormal = Normal();
+						eyeSampleResult.materialID = std::numeric_limits<u_int>::max();
+						eyeSampleResult.objectID = std::numeric_limits<u_int>::max();
+						eyeSampleResult.uv = UV(std::numeric_limits<float>::infinity(),
+								std::numeric_limits<float>::infinity());
 					}
 					break;
 				}
 				eyeVertex.throughput *= connectionThroughput;
 
 				// Something was hit
+
+				if (albedoToDo && eyeVertex.bsdf.IsAlbedoEndPoint()) {
+					eyeSampleResult.albedo = eyeVertex.throughput * eyeVertex.bsdf.Albedo();
+					albedoToDo = false;
+				}
+
 				if (eyeSampleResult.firstPathVertex) {
 					eyeSampleResult.alpha = 1.f;
 					eyeSampleResult.depth = eyeRayHit.t;
+					eyeSampleResult.position = eyeVertex.bsdf.hitPoint.p;
+					eyeSampleResult.geometryNormal = eyeVertex.bsdf.hitPoint.geometryN;
+					eyeSampleResult.shadingNormal = eyeVertex.bsdf.hitPoint.shadeN;
+					eyeSampleResult.materialID = eyeVertex.bsdf.GetMaterialID();
+					eyeSampleResult.objectID = eyeVertex.bsdf.GetObjectID();
+					eyeSampleResult.uv = eyeVertex.bsdf.hitPoint.uv;
+
 				}
 
 				// Update MIS constants

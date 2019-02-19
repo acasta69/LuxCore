@@ -35,11 +35,6 @@ public:
 	
 	// Used for OpenCL data translation
 	const std::vector<DLSCacheEntry> &GetAllEntries() const { return allEntries; }
-	const IndexBVHArrayNode *GetArrayNodes(u_int *count = NULL) const {
-		if (count)
-			*count = nNodes;
-		return arrayNodes;
-	}
 
 private:
 	float entryNormalCosAngle;
