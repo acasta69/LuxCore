@@ -59,7 +59,7 @@ jobs:
       msbuildArguments: '/nologo /verbosity:normal /p:WarningLevel=0 /maxcpucount:2'
       # maximumCpuCount --> false to build solution 1 project at a time
       # Avoids "Error C1002: compiler out of heap space in pass 2"
-      #maximumCpuCount: false
+      maximumCpuCount: false
       createLogFile: true
     displayName: Building LuxCore - OpenCL disabled
   - script: './scripts/azurepipeline/windows/post-build.cmd /no-ocl'
