@@ -237,11 +237,14 @@ void TraceVisibilityThread::RenderFunc() {
 		// Add all visibility particles to the Octree (under a mutex)
 		//----------------------------------------------------------------------
 		
-		{
+		if (visibilityParticles.size() > 0) {
 			boost::unique_lock<boost::mutex> lock(particlesOctreeMutex);
 
 			u_int cacheLookUp = 0;
 			u_int cacheHits = 0;
+			// I need some overlap between entries to avoid very small and
+			// hard to find regions. I use a 10% overlap.
+			const float maxDistance2 = Sqr(pgic.params.visibility.lookUpRadius * 0.9f);
 			for (auto const &vp : visibilityParticles) {
 				// Check if a cache entry is available for this point
 				const u_int entryIndex = particlesOctree->GetNearestEntry(vp.p, vp.n);
@@ -250,8 +253,22 @@ void TraceVisibilityThread::RenderFunc() {
 					// Add as a new entry
 					pgic.visibilityParticles.push_back(vp);
 					particlesOctree->Add(pgic.visibilityParticles.size() - 1);
-				} else
-					++cacheHits;
+				} else {
+						VisibilityParticle &entry = pgic.visibilityParticles[entryIndex];
+						const float distance2 = DistanceSquared(vp.p, entry.p);
+
+					if (distance2 > maxDistance2) {
+						// Add as a new entry
+						pgic.visibilityParticles.push_back(vp);
+						particlesOctree->Add(pgic.visibilityParticles.size() - 1);
+					} else {
+						++cacheHits;
+
+						// Update the statistics about the area covered by this entry
+						entry.hitsAccumulatedDistance += sqrtf(distance2);
+						entry.hitsCount += 1;
+					}
+				}
 
 				++cacheLookUp;
 			}

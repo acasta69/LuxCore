@@ -16,6 +16,9 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include <math.h>
+
+
 #include <boost/format.hpp>
 
 #include "slg/samplers/sobol.h"
@@ -51,16 +54,16 @@ PhotonGICache::PhotonGICache(const Scene *scn, const PhotonGICacheParams &p) :
 
 	if (params.indirect.enabled) {
 		if (params.caustic.enabled) {
-			params.visibility.lookUpRadius = Min(params.indirect.lookUpRadius, params.caustic.lookUpRadius) * .95f;
-			params.visibility.lookUpNormalAngle = Min(params.indirect.lookUpNormalAngle, params.caustic.lookUpNormalAngle) * .95f;
+			params.visibility.lookUpRadius = Max(params.indirect.lookUpRadius, params.caustic.lookUpRadius);
+			params.visibility.lookUpNormalAngle = Max(params.indirect.lookUpNormalAngle, params.caustic.lookUpNormalAngle);
 		} else {
-			params.visibility.lookUpRadius = params.indirect.lookUpRadius * .95f;
-			params.visibility.lookUpNormalAngle = params.indirect.lookUpNormalAngle * .95f;
+			params.visibility.lookUpRadius = params.indirect.lookUpRadius;
+			params.visibility.lookUpNormalAngle = params.indirect.lookUpNormalAngle;
 		}
 	} else {
 		if (params.caustic.enabled) {
-			params.visibility.lookUpRadius = params.caustic.lookUpRadius * .95f;
-			params.visibility.lookUpNormalAngle = params.caustic.lookUpNormalAngle * .95f;
+			params.visibility.lookUpRadius = params.caustic.lookUpRadius;
+			params.visibility.lookUpNormalAngle = params.caustic.lookUpNormalAngle;
 		} else
 			throw runtime_error("Indirect and/or caustic cache must be enabled in PhotonGI");
 	}
@@ -93,27 +96,19 @@ bool PhotonGICache::IsPhotonGIEnabled(const BSDF &bsdf) const {
 float PhotonGICache::GetIndirectUsageThreshold(const BSDFEvent lastBSDFEvent, const float lastGlossiness) const {
 	// Decide if the glossy surface is "nearly specular"
 
-	if (lastBSDFEvent & GLOSSY) {
-		// If it is a GLOSSY surface I can not mix normal path
-		// tracing and cache results so I return INF or 0.0
-		if (lastGlossiness < params.indirect.glossinessUsageThreshold) {
-			// Disable the cache, the surface is "nearly specular"
-			return numeric_limits<float>::infinity();
-		} else {
-			// Always enable the cache for "nearly diffuse
-			return 0.f;
-		}
-	} else {
-		// If it wasn't GLOSSY must be diffuse and I can mix normal path
-		// tracing and cache results
+	if ((lastBSDFEvent & GLOSSY) && (lastGlossiness < params.indirect.glossinessUsageThreshold)) {
+		// Disable the cache, the surface is "nearly specular"
+		return numeric_limits<float>::infinity();
+	} else
 		return params.indirect.usageThresholdScale * params.indirect.lookUpRadius;
-	}
 }
 
-bool PhotonGICache::IsDirectLightHitVisible(const bool causticCacheAlreadyUsed) const {
+bool PhotonGICache::IsDirectLightHitVisible(const bool causticCacheAlreadyUsed,
+		const BSDFEvent lastBSDFEvent) const {
 	return !params.caustic.enabled ||
-		(!causticCacheAlreadyUsed && (params.debugType == PGIC_DEBUG_NONE));
-}
+		((!causticCacheAlreadyUsed || !(lastBSDFEvent & SPECULAR)) &&
+			(params.debugType == PGIC_DEBUG_NONE));
+	}
 
 void PhotonGICache::TraceVisibilityParticles() {
 	const size_t renderThreadCount = boost::thread::hardware_concurrency();
@@ -147,9 +142,14 @@ void PhotonGICache::TraceVisibilityParticles() {
 
 		delete renderThreads[i];
 	}
-
+	
 	visibilityParticles.shrink_to_fit();
 	SLG_LOG("PhotonGI visibility total entries: " << visibilityParticles.size());
+
+	if (visibilityParticles.size() == 0) {
+		// Something wrong, nothing in the scene is visible and/or cache enabled
+		return;
+	}
 
 	// Free the Octree and build the KdTree
 	delete particlesOctree;
@@ -219,11 +219,14 @@ void PhotonGICache::CreateRadiancePhotons() {
 	for (u_int index = 0 ; index < visibilityParticles.size(); ++index) {
 		const VisibilityParticle &vp = visibilityParticles[index];
 
-		// Using here params.visibility.lookUpRadius2 would be more correct. However
-		// params.visibility.lookUpRadius2 is usually jut 95% of params.indirect.lookUpRadius2.
+		// The estimated area covered by the entry (if I have enough hits)
+		const float area = (vp.hitsCount < 16) ? 
+			(params.indirect.lookUpRadius2 * M_PI) :
+			(Sqr(2.f * vp.hitsAccumulatedDistance / vp.hitsCount) * M_PI);
+
 		outgoingRadianceValues[index] = (vp.bsdfEvaluateTotal * INV_PI) *
 				vp.alphaAccumulated /
-				(indirectPhotonTracedCount * params.indirect.lookUpRadius2 * M_PI);
+				(indirectPhotonTracedCount * area);
 
 		assert (outgoingRadianceValues[index].IsValid());
 	}
@@ -232,36 +235,40 @@ void PhotonGICache::CreateRadiancePhotons() {
 	// Filter outgoing radiance
 	//--------------------------------------------------------------------------
 
-	SLG_LOG("PhotonGI filtering radiance photons");
+	if (params.indirect.filterRadiusScale > 0.f) {
+		SLG_LOG("PhotonGI filtering radiance photons");
 
-	const float lookUpRadius2 = Sqr(params.indirect.filterRadiusScale * params.indirect.lookUpRadius);
-	const float lookUpCosNormalAngle = cosf(Radians(params.indirect.lookUpNormalAngle));
+		const float lookUpRadius2 = Sqr(params.indirect.filterRadiusScale * params.indirect.lookUpRadius);
+		const float lookUpCosNormalAngle = cosf(Radians(params.indirect.lookUpNormalAngle));
 
-	vector<Spectrum> filteredOutgoingRadianceValues(visibilityParticles.size());
+		vector<Spectrum> filteredOutgoingRadianceValues(visibilityParticles.size());
 
-	#pragma omp parallel for
-	for (
-			// Visual C++ 2013 supports only OpenMP 2.5
+		#pragma omp parallel for
+		for (
+				// Visual C++ 2013 supports only OpenMP 2.5
 #if _OPENMP >= 200805
-			unsigned
+				unsigned
 #endif
-			int index = 0; index < visibilityParticles.size(); ++index) {
-		// Look for all near particles
+				int index = 0; index < visibilityParticles.size(); ++index) {
+			// Look for all near particles
 
-		vector<u_int> nearParticleIndices;
-		const VisibilityParticle &vp = visibilityParticles[index];
-		// I can use visibilityParticlesKdTree to get radiance photons indices
-		// because there is a one on one correspondence 
-		visibilityParticlesKdTree->GetAllNearEntries(nearParticleIndices, vp.p, vp.n,
-				lookUpRadius2, lookUpCosNormalAngle);
+			vector<u_int> nearParticleIndices;
+			const VisibilityParticle &vp = visibilityParticles[index];
+			// I can use visibilityParticlesKdTree to get radiance photons indices
+			// because there is a one on one correspondence 
+			visibilityParticlesKdTree->GetAllNearEntries(nearParticleIndices, vp.p, vp.n,
+					lookUpRadius2, lookUpCosNormalAngle);
 
-		if (nearParticleIndices.size() > 0) {
-			Spectrum &v = filteredOutgoingRadianceValues[index];
-			for (auto nearIndex : nearParticleIndices)
-				v += outgoingRadianceValues[nearIndex];
+			if (nearParticleIndices.size() > 0) {
+				Spectrum &v = filteredOutgoingRadianceValues[index];
+				for (auto nearIndex : nearParticleIndices)
+					v += outgoingRadianceValues[nearIndex];
 
-			v /= nearParticleIndices.size();
-		} 
+				v /= nearParticleIndices.size();
+			} 
+		}
+		
+		outgoingRadianceValues = filteredOutgoingRadianceValues;
 	}
 
 	//--------------------------------------------------------------------------
@@ -269,11 +276,11 @@ void PhotonGICache::CreateRadiancePhotons() {
 	//--------------------------------------------------------------------------
 
 	for (u_int index = 0 ; index < visibilityParticles.size(); ++index) {
-		if (!filteredOutgoingRadianceValues[index].Black()) {
+		if (!outgoingRadianceValues[index].Black()) {
 			const VisibilityParticle &vp = visibilityParticles[index];
 
 			radiancePhotons.push_back(RadiancePhoton(vp.p,
-					vp.n, filteredOutgoingRadianceValues[index]));
+					vp.n, outgoingRadianceValues[index]));
 		}
 	}
 	radiancePhotons.shrink_to_fit();
@@ -361,6 +368,10 @@ void PhotonGICache::Preprocess() {
 	//--------------------------------------------------------------------------
 
 	TraceVisibilityParticles();
+	if (visibilityParticles.size() == 0) {
+		SLG_LOG("PhotonGI WARNING: nothing is visible and/or cache enabled.");
+		return;
+	}
 
 	//--------------------------------------------------------------------------
 	// Fill all photon vectors
@@ -376,9 +387,11 @@ void PhotonGICache::Preprocess() {
 		SLG_LOG("PhotonGI building radiance photon data");
 		CreateRadiancePhotons();
 
-		SLG_LOG("PhotonGI building radiance photons BVH");
-		radiancePhotonsBVH = new PGICRadiancePhotonBvh(radiancePhotons,
-				params.indirect.lookUpRadius, params.indirect.lookUpNormalAngle);
+		if (radiancePhotons.size() > 0) {
+			SLG_LOG("PhotonGI building radiance photons BVH");
+			radiancePhotonsBVH = new PGICRadiancePhotonBvh(radiancePhotons,
+					params.indirect.lookUpRadius, params.indirect.lookUpNormalAngle);
+		}
 	}
 
 	//--------------------------------------------------------------------------

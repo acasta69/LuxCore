@@ -32,10 +32,7 @@ GlossyCoatingMaterial::GlossyCoatingMaterial(const Texture *transp, const Textur
 			const Texture *ka, const Texture *d, const Texture *i, const bool mbounce) :
 			Material(transp, emitted, bump), matBase(mB), Ks(ks), nu(u), nv(v),
 			Ka(ka), depth(d), index(i), multibounce(mbounce) {
-	const float glossinessU = nu ? nu->Filter() : 1.f;
-	const float glossinessV = nv ? nv->Filter() : 1.f;
-
-	glossiness = Min(Min(glossinessU, glossinessV), matBase->GetGlossiness());
+	glossiness = Min(ComputeGlossiness(nu, nv), matBase->GetGlossiness());
 }
 
 const Volume *GlossyCoatingMaterial::GetInteriorVolume(const HitPoint &hitPoint,
@@ -276,7 +273,7 @@ Spectrum GlossyCoatingMaterial::Sample(const HitPoint &hitPoint,
 			assert (coatingF.IsValid());
 
 			coatingPdf = SchlickBSDF_CoatingPdf(roughness, anisotropy, localFixedDir, *localSampledDir);
-			IsValid(coatingPdf);
+			assert (IsValid(coatingPdf));
 		} else
 			coatingPdf = 0.f;
 	} else {
@@ -466,6 +463,9 @@ void GlossyCoatingMaterial::UpdateTextureReferences(const Texture *oldTex, const
 		depth = newTex;
 	if (index == oldTex)
 		index = newTex;
+
+	// Always update glossiness just in case matBase->GetGlossiness() has changed
+	glossiness = Min(ComputeGlossiness(nu, nv), matBase->GetGlossiness());
 }
 
 Properties GlossyCoatingMaterial::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const  {
