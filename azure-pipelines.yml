@@ -110,7 +110,7 @@ jobs:
 #    displayName: Testing LuxCore
 
 - job: CreateGithubRelease
-  dependsOn: LuxCoreRenderLinux, LuxCoreRenderWindows
+  dependsOn: LuxCoreRenderWindows
   condition: succeeded()
   timeoutInMinutes: 0
   pool:
