@@ -122,8 +122,6 @@ jobs:
     inputs:
       githubConnection: LuxCore_acasta_Github_Release
       repositoryName: acasta69/LuxCore
-      tagSource: manual
-      tag: $(Build.BuildNumber)      
       assets: |
            $(Build.ArtifactStagingDirectory)/*.zip
            $(Build.ArtifactStagingDirectory)/*.tar.bz2
