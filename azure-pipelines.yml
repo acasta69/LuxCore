@@ -120,7 +120,7 @@ jobs:
   - task: GithubRelease@0 
     displayName: 'Create GitHub Release'      
     inputs:
-      githubConnection: LuxCore_acasta_Github_Release
+      githubConnection: LuxCore_acasta69_Github_Connection
       repositoryName: acasta69/LuxCore
       assets: |
            $(Build.ArtifactStagingDirectory)/*.zip
