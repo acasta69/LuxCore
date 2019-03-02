@@ -1,8 +1,8 @@
 :: Setting up dependencies
 cd ..
 git lfs install
-git clone --branch master https://github.com/LuxCoreRender/WindowsCompile .\WindowsCompile
-git clone --branch master https://github.com/LuxCoreRender/WindowsCompileDeps .\WindowsCompileDeps
+git clone --branch master https://github.com/acasta69/WindowsCompile .\WindowsCompile
+git clone --branch master https://github.com/acasta69/WindowsCompileDeps .\WindowsCompileDeps
 
 mklink /J Luxcore %SYSTEM_DEFAULTWORKINGDIRECTORY%
 
