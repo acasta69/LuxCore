@@ -108,21 +108,3 @@ jobs:
 #    displayName: Building LuxCore
 #  - script: ./scripts/azurepipeline/macos/test.sh
 #    displayName: Testing LuxCore
-
-- job: CreateGithubRelease
-  dependsOn: LuxCoreRenderWindows
-  condition: succeeded()
-  timeoutInMinutes: 0
-  pool:
-    vmImage: 'vs2017-win2016'
-
-  steps:
-  - task: GithubRelease@0 
-    displayName: 'Create GitHub Release'      
-    inputs:
-      githubConnection: test_connection
-      repositoryName: acasta69/LuxCore
-      assets: |
-           $(Build.ArtifactStagingDirectory)/*.zip
-           $(Build.ArtifactStagingDirectory)/*.tar.bz2
-           $(Build.ArtifactStagingDirectory)/*.tar.gz
