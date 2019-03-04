@@ -114,13 +114,13 @@ jobs:
   condition: succeeded()
   timeoutInMinutes: 0
   pool:
-    vmImage: 'ubuntu-16.04'
+    vmImage: 'vs2017-win2016'
 
   steps:
   - task: GithubRelease@0 
     displayName: 'Create GitHub Release'      
     inputs:
-      githubConnection: LuxCore_acasta69_Github_Connection
+      githubConnection: test_connection
       repositoryName: acasta69/LuxCore
       assets: |
            $(Build.ArtifactStagingDirectory)/*.zip
