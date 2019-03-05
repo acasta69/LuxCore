@@ -6,6 +6,9 @@ resources:
   - container: LinuxContainer
     image: ubuntu:14.04
 
+variables:
+- group: GithubTag
+    
 trigger:
   tags:
     include:
@@ -90,9 +93,9 @@ jobs:
     # displayName: Testing LuxCore
   - task: PublishBuildArtifacts@1
     inputs:
-      pathtoPublish: '$(System.DefaultWorkingDirectory)\..\WindowsCompile\luxcorerender-latest-win64.zip'
+      pathtoPublish: '$(System.DefaultWorkingDirectory)\..\WindowsCompile\luxcorerender-$(github_tag)-win64.zip'
       artifactName: LuxCore
-    displayName: 'Upload luxcorerender-latest-win64.zip'
+    displayName: 'Upload luxcorerender-$(github_tag)-win64.zip'
     condition: eq(variables['System.PullRequest.IsFork'], 'False')
   # - task: PublishBuildArtifacts@1
     # inputs:
