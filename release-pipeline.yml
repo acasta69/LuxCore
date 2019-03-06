@@ -93,7 +93,7 @@ jobs:
     # displayName: Testing LuxCore
   - task: PublishBuildArtifacts@1
     inputs:
-      pathtoPublish: '$(System.DefaultWorkingDirectory)\..\WindowsCompile\luxcorerender-$(github_tag)-win64.zip'
+      pathtoPublish: '$(Build.ArtifactStagingDirectory)'
       artifactName: LuxCore
     displayName: 'Upload luxcorerender-$(github_tag)-win64.zip'
     condition: eq(variables['System.PullRequest.IsFork'], 'False')
