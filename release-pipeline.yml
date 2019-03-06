@@ -91,12 +91,12 @@ jobs:
     # displayName: Gathering and packing binaries - OpenCL enabled
   # - script: './scripts/azurepipeline/windows/test.cmd'
     # displayName: Testing LuxCore
-  # - task: PublishBuildArtifacts@1
-    # inputs:
-      # pathtoPublish: '$(System.DefaultWorkingDirectory)\..\WindowsCompile\luxcorerender-$(github_tag)-win64.zip'
-      # artifactName: LuxCore
-    # displayName: 'Upload luxcorerender-$(github_tag)-win64.zip'
-    # condition: eq(variables['System.PullRequest.IsFork'], 'False')
+  - task: PublishBuildArtifacts@1
+    inputs:
+      pathtoPublish: '$(System.DefaultWorkingDirectory)\..\WindowsCompile\luxcorerender-$(github_tag)-win64.zip'
+      artifactName: LuxCore
+    displayName: 'Upload luxcorerender-$(github_tag)-win64.zip'
+    condition: eq(variables['System.PullRequest.IsFork'], 'False')
   # - task: PublishBuildArtifacts@1
     # inputs:
       # pathtoPublish: '$(System.DefaultWorkingDirectory)\..\WindowsCompile\luxcorerender-latest-win64-opencl.zip'
