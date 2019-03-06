@@ -1,4 +1,5 @@
 :: Gathering and packing binaries
+echo %GITHUB_TAG%
 for /f "tokens=2 delims=_" %%a in ('git tag --points-at HEAD') do set GITHUB_TAG=%%a
 echo %GITHUB_TAG%
 cd ..\WindowsCompile
