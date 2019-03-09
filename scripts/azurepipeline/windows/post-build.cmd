@@ -13,4 +13,3 @@ if "%1" EQU "/no-ocl" (
 
 move %DIR% %LUX_LATEST%
 .\support\bin\7za.exe a %LUX_LATEST%.zip %LUX_LATEST%
-copy %LUX_LATEST%.zip %BUILD_ARTIFACTSTAGINGDIRECTORY%
