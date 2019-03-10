@@ -2,7 +2,9 @@
 echo %RELEASE_BUILD%
 if "%RELEASE_BUILD%" EQU "TRUE" (
     echo This is a release build
-    for /f "tokens=2 delims=_" %%a in ('git tag --points-at HEAD') do set GITHUB_TAG=%%a
+    echo %BUILD_SOURCEVERSION%
+    git tag --points-at %BUILD_SOURCEVERSION%
+    for /f "tokens=2 delims=_" %%a in ('git tag --points-at %BUILD_SOURCEVERSION%') do set GITHUB_TAG=%%a
 ) else (
     set GITHUB_TAG=latest
 )
