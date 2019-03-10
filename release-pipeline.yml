@@ -69,7 +69,7 @@ jobs:
     # displayName: Building LuxCore - OpenCL disabled
   - script: './scripts/azurepipeline/windows/post-build.cmd /no-ocl'
     displayName: Gathering and packing binaries - OpenCL disabled
-    env: { release_build: "TRUE" }
+    env: { release_build: 'TRUE' }
   # - script: './scripts/azurepipeline/windows/build.cmd /cmake-only'
     # displayName: Generating build files with CMake - OpenCL enabled
   # - task: MSBuild@1
