@@ -50,7 +50,7 @@ jobs:
       versionSpec: '3.5'
       addToPath: true
       architecture: 'x64'
-  - script: ./scripts/azurepipeline/windows/deps-setup.cmd
+  - script: './scripts/azurepipeline/windows/deps-setup.cmd'
     displayName: Getting required deps
   - script: './scripts/azurepipeline/windows/build.cmd /cmake-only /no-ocl'
     displayName: Generating build files with CMake - OpenCL disabled
@@ -69,6 +69,7 @@ jobs:
     # displayName: Building LuxCore - OpenCL disabled
   - script: './scripts/azurepipeline/windows/post-build.cmd /no-ocl'
     displayName: Gathering and packing binaries - OpenCL disabled
+    env: { release_build: TRUE}
   # - script: './scripts/azurepipeline/windows/build.cmd /cmake-only'
     # displayName: Generating build files with CMake - OpenCL enabled
   # - task: MSBuild@1
