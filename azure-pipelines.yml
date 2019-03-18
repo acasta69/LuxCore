@@ -6,11 +6,6 @@ resources:
   - container: LinuxContainer
     image: ubuntu:14.04
 
-trigger:
-  branches:
-    exclude:
-      refs/tags/{luxcorerender_v2.2gamma19}
-    
 jobs:
 # - job: LuxCoreRenderLinux
   # timeoutInMinutes: 0
