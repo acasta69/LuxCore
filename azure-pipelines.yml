@@ -9,7 +9,7 @@ resources:
 trigger:
   branches:
     exclude:
-      refs/tags/luxcorerender_v2.2gamma19
+      refs/tags/{luxcorerender_v*}
     
 jobs:
 # - job: LuxCoreRenderLinux
