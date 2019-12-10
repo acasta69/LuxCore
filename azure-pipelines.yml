@@ -12,6 +12,7 @@ trigger:
     - '*'
     exclude:
     - 'refs/tags/*'
+    
 
 jobs:
 # - job: LuxCoreRenderLinux
