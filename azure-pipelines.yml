@@ -9,7 +9,7 @@ resources:
 trigger:
   branches:
     include:
-    - '*'
+    - master
     exclude:
     - 'refs/tags/*'
 
