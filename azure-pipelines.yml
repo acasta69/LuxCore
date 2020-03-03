@@ -13,7 +13,6 @@ trigger:
     exclude:
     - '*'
 
-
 jobs:
 # - job: LuxCoreRenderLinux
   # timeoutInMinutes: 0
