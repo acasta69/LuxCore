@@ -50,6 +50,12 @@ scene.objects.sphere-mid.ply = scenes/cornell/sphere-mid.ply
 scene.objects.sphere-right.material = glass-right
 scene.objects.sphere-right.ply = scenes/cornell/sphere-right.ply
 ################################################################################
+#scene.materials.Light.type = matte
+#scene.materials.Light.emission = 10. 10. 10.
+#scene.materials.Light.kd = 0.75 0.75 0.75
+#scene.objects.Grey.material = Light
+#scene.objects.Grey.ply = scenes/cornell/Grey.ply
+################################################################################
 scene.lights.l1.type = point
 scene.lights.l1.position = -2.78 2.78 4.9
 scene.lights.l1.gain = 35.0 35.0 35.0

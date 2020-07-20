@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -33,7 +33,7 @@ using namespace slg;
 
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::Film)
 
-Film *Film::LoadSerialized(const std::string &fileName) {
+Film *Film::LoadSerialized(const string &fileName) {
 	SerializationInputFile sif(fileName);
 
 	Film *film;
@@ -45,7 +45,7 @@ Film *Film::LoadSerialized(const std::string &fileName) {
 	return film;
 }
 
-void Film::SaveSerialized(const std::string &fileName, const Film *film) {
+void Film::SaveSerialized(const string &fileName, const Film *film) {
 	SerializationOutputFile sof(fileName);
 
 	sof.GetArchive() << film;
@@ -88,6 +88,8 @@ template<class Archive> void Film::load(Archive &ar, const u_int version) {
 	ar & channel_MATERIAL_ID_COLOR;
 	ar & channel_ALBEDO;
 	ar & channel_AVG_SHADING_NORMAL;
+	ar & channel_NOISE;
+	ar & channel_USER_IMPORTANCE;
 
 	ar & channels;
 	ar & width;
@@ -101,25 +103,32 @@ template<class Archive> void Film::load(Archive &ar, const u_int version) {
 	ar & maskMaterialIDs;
 	ar & byMaterialIDs;
 
-	ar & statsTotalSampleCount;
 	ar & statsStartSampleTime;
+	ar & statsConvergence;
+	ar & statsStartSampleTime;
+	ar & samplesCounts;
 
 	ar & imagePipelines;
 
 	ar & convTest;
+	ar & noiseEstimation;
 	ar & haltTime;
 	ar & haltSPP;
-	ar & haltThreshold;
-	ar & haltThresholdWarmUp;
-	ar & haltThresholdTestStep;
-	ar & haltThresholdUseFilter;
-	ar & haltThresholdStopRendering;
+	ar & haltNoiseThreshold;
+	ar & haltNoiseThresholdWarmUp;
+	ar & haltNoiseThresholdTestStep;
+	ar & haltNoiseThresholdUseFilter;
+	ar & haltNoiseThresholdStopRendering;
+
+	ar & noiseEstimationWarmUp;
+	ar & noiseEstimationTestStep;
+	ar & noiseEstimationFilterScale;
 
 	ar & filmOutputs;
 
 	ar & initialized;
 
-	SetUpOCL();
+	SetUpHW();
 }
 
 template<class Archive> void Film::save(Archive &ar, const u_int version) const {
@@ -157,6 +166,8 @@ template<class Archive> void Film::save(Archive &ar, const u_int version) const 
 	ar & channel_MATERIAL_ID_COLOR;
 	ar & channel_ALBEDO;
 	ar & channel_AVG_SHADING_NORMAL;
+	ar & channel_NOISE;
+	ar & channel_USER_IMPORTANCE;
 
 	ar & channels;
 	ar & width;
@@ -170,19 +181,26 @@ template<class Archive> void Film::save(Archive &ar, const u_int version) const 
 	ar & maskMaterialIDs;
 	ar & byMaterialIDs;
 
-	ar & statsTotalSampleCount;
 	ar & statsStartSampleTime;
+	ar & statsConvergence;
+	ar & statsStartSampleTime;
+	ar & samplesCounts;
 
 	ar & imagePipelines;
 
 	ar & convTest;
+	ar & noiseEstimation;
 	ar & haltTime;
 	ar & haltSPP;
-	ar & haltThreshold;
-	ar & haltThresholdWarmUp;
-	ar & haltThresholdTestStep;
-	ar & haltThresholdUseFilter;
-	ar & haltThresholdStopRendering;
+	ar & haltNoiseThreshold;
+	ar & haltNoiseThresholdWarmUp;
+	ar & haltNoiseThresholdTestStep;
+	ar & haltNoiseThresholdUseFilter;
+	ar & haltNoiseThresholdStopRendering;
+
+	ar & noiseEstimationWarmUp;
+	ar & noiseEstimationTestStep;
+	ar & noiseEstimationFilterScale;
 
 	ar & filmOutputs;
 
@@ -193,7 +211,4 @@ namespace slg {
 // Explicit instantiations for portable archives
 template void Film::save(LuxOutputArchive &ar, const u_int version) const;
 template void Film::load(LuxInputArchive &ar, const u_int version);
-// The following 2 lines shouldn't be required but they are with GCC 5
-template void Film::save(boost::archive::polymorphic_oarchive &ar, const u_int version) const;
-template void Film::load(boost::archive::polymorphic_iarchive &ar, const u_int version);
 }

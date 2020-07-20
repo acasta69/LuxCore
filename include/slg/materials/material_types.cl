@@ -1,7 +1,7 @@
 #line 2 "material_types.cl"
 
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -18,10 +18,55 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+
+//------------------------------------------------------------------------------
+// Material evaluation op
+//------------------------------------------------------------------------------
+
+typedef enum {
+	EVAL_ALBEDO,
+	EVAL_GET_INTERIOR_VOLUME,
+	EVAL_GET_EXTERIOR_VOLUME,
+	EVAL_GET_EMITTED_RADIANCE,
+	EVAL_GET_PASS_TROUGH_TRANSPARENCY,
+	EVAL_EVALUATE,
+	EVAL_SAMPLE,
+	EVAL_CONDITIONAL_GOTO,
+	EVAL_UNCONDITIONAL_GOTO,
+	// For the very special case of Mix material
+	EVAL_GET_VOLUME_MIX_SETUP1,
+	EVAL_GET_VOLUME_MIX_SETUP2,
+	EVAL_GET_EMITTED_RADIANCE_MIX_SETUP1,
+	EVAL_GET_EMITTED_RADIANCE_MIX_SETUP2,
+	EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP1,
+	EVAL_GET_PASS_TROUGH_TRANSPARENCY_MIX_SETUP2,
+	EVAL_EVALUATE_MIX_SETUP1,
+	EVAL_EVALUATE_MIX_SETUP2,
+	EVAL_SAMPLE_MIX_SETUP1,
+	EVAL_SAMPLE_MIX_SETUP2,
+	// For the very special case of GlossyCoating material
+	EVAL_EVALUATE_GLOSSYCOATING_SETUP,
+	EVAL_SAMPLE_GLOSSYCOATING_SETUP,
+	EVAL_SAMPLE_GLOSSYCOATING_CLOSE_SAMPLE_BASE,
+	EVAL_SAMPLE_GLOSSYCOATING_CLOSE_EVALUATE_BASE
+} MaterialEvalOpType;
+
+typedef struct {
+	unsigned int matIndex;
+	MaterialEvalOpType evalType;
+	union {
+		unsigned int opsCount;
+	} opData;
+} MaterialEvalOp;
+
+//------------------------------------------------------------------------------
+// Materials
+//------------------------------------------------------------------------------
+
 typedef enum {
 	MATTE, MIRROR, GLASS, ARCHGLASS, MIX, NULLMAT, MATTETRANSLUCENT,
 	GLOSSY2, METAL2, ROUGHGLASS, VELVET, CLOTH, CARPAINT, ROUGHMATTE,
-	ROUGHMATTETRANSLUCENT, GLOSSYTRANSLUCENT, GLOSSYCOATING,
+	ROUGHMATTETRANSLUCENT, GLOSSYTRANSLUCENT, GLOSSYCOATING, DISNEY,
 			
 	// Volumes
 	HOMOGENEOUS_VOL, CLEAR_VOL, HETEROGENEOUS_VOL
@@ -45,6 +90,8 @@ typedef struct {
 	unsigned int ktTexIndex;
 	unsigned int exteriorIorTexIndex, interiorIorTexIndex;
 	unsigned int cauchyCTex;
+	unsigned int filmThicknessTexIndex;
+	unsigned int filmIorTexIndex;
 } GlassParam;
 
 typedef struct {
@@ -56,6 +103,8 @@ typedef struct {
     unsigned int krTexIndex;
 	unsigned int ktTexIndex;
 	unsigned int exteriorIorTexIndex, interiorIorTexIndex;
+	unsigned int filmThicknessTexIndex;
+	unsigned int filmIorTexIndex;
 } ArchGlassParam;
 
 typedef struct {
@@ -99,6 +148,8 @@ typedef struct {
 	unsigned int exteriorIorTexIndex, interiorIorTexIndex;
 	unsigned int nuTexIndex;
 	unsigned int nvTexIndex;
+	unsigned int filmThicknessTexIndex;
+	unsigned int filmIorTexIndex;
 } RoughGlassParam;
 
 typedef struct {
@@ -110,7 +161,7 @@ typedef struct {
 } VelvetParam;
 
 typedef enum {
-	DENIM, SILKSHANTUNG, SILKCHARMEUSE, COTTONTWILL, WOOLGARBARDINE, POLYESTER
+	DENIM, SILKSHANTUNG, SILKCHARMEUSE, COTTONTWILL, WOOLGABARDINE, POLYESTER
 } ClothPreset;
 
 typedef enum {
@@ -223,6 +274,23 @@ typedef struct {
 } GlossyCoatingParam;
 
 typedef struct {
+	unsigned int baseColorTexIndex;
+	unsigned int subsurfaceTexIndex;
+	unsigned int roughnessTexIndex;
+	unsigned int metallicTexIndex;
+	unsigned int specularTexIndex;
+	unsigned int specularTintTexIndex;
+	unsigned int clearcoatTexIndex;
+	unsigned int clearcoatGlossTexIndex;
+	unsigned int anisotropicTexIndex;
+	unsigned int sheenTexIndex;
+	unsigned int sheenTintTexIndex;
+	unsigned int filmAmountTexIndex;
+	unsigned int filmThicknessTexIndex;
+	unsigned int filmIorTexIndex;
+} DisneyParam;
+
+typedef struct {
 	unsigned int sigmaATexIndex;
 } ClearVolumeParam;
 
@@ -264,13 +332,29 @@ typedef struct {
 	Spectrum emittedFactor;
 	float emittedCosThetaMax;
 	int usePrimitiveArea;
-	unsigned int transpTexIndex, emitTexIndex, bumpTexIndex;
+	unsigned int frontTranspTexIndex, backTranspTexIndex;
+	Spectrum passThroughShadowTransparency;
+	unsigned int emitTexIndex, bumpTexIndex;
 	// Type of indirect paths where a light source is visible with a direct hit. It is
 	// an OR of DIFFUSE, GLOSSY and SPECULAR.
 	BSDFEvent visibility;
 	unsigned int interiorVolumeIndex, exteriorVolumeIndex;
-	float glossiness;
+	float glossiness, avgPassThroughTransparency;
 	int isShadowCatcher, isShadowCatcherOnlyInfiniteLights, isPhotonGIEnabled;
+
+	// The result of calling Material::GetEventTypes()
+	BSDFEvent eventTypes;
+	// The result of calling Material::IsDelta()
+	int isDelta; 
+
+	// Material eval. ops start index and length 
+	unsigned int evalAlbedoOpStartIndex, evalAlbedoOpLength;
+	unsigned int evalGetInteriorVolumeOpStartIndex, evalGetInteriorVolumeOpLength;
+	unsigned int evalGetExteriorVolumeOpStartIndex, evalGetExteriorVolumeOpLength;
+	unsigned int evalGetEmittedRadianceOpStartIndex, evalGetEmittedRadianceOpLength;
+	unsigned int evalGetPassThroughTransparencyOpStartIndex, evalGetPassThroughTransparencyOpLength;
+	unsigned int evalEvaluateOpStartIndex, evalEvaluateOpLength;
+	unsigned int evalSampleOpStartIndex, evalSampleOpLength;
 
 	union {
 		MatteParam matte;
@@ -291,6 +375,7 @@ typedef struct {
 		CarPaintParam carpaint;
 		GlossyTranslucentParam glossytranslucent;
 		GlossyCoatingParam glossycoating;
+		DisneyParam disney;
 		VolumeParam volume;
 	};
 } Material;
@@ -301,7 +386,39 @@ typedef struct {
 
 #if defined(SLG_OPENCL_KERNEL)
 
-#define MATERIALS_PARAM_DECL , __global const Material* restrict mats TEXTURES_PARAM_DECL
-#define MATERIALS_PARAM , mats TEXTURES_PARAM
+#define MATERIALS_PARAM_DECL \
+	, __global const Material* restrict mats \
+	, __global const MaterialEvalOp* restrict matEvalOps \
+	, __global float *matEvalStacks \
+	, const uint maxMaterialEvalStackSize \
+	TEXTURES_PARAM_DECL
+#define MATERIALS_PARAM \
+	, mats \
+	, matEvalOps \
+	, matEvalStacks \
+	, maxMaterialEvalStackSize \
+	TEXTURES_PARAM
+
+#define MATERIAL_EVALUATE_RETURN_BLACK { \
+		const float3 result = BLACK; \
+		EvalStack_PushFloat3(result); \
+		const BSDFEvent event = NONE; \
+		EvalStack_PushBSDFEvent(event); \
+		const float directPdfW = 0.f; \
+		EvalStack_PushFloat(directPdfW); \
+		return; \
+	}
+
+#define MATERIAL_SAMPLE_RETURN_BLACK { \
+		const float3 result = BLACK; \
+		EvalStack_PushFloat3(result); \
+		const float3 sampledDir = ZERO; \
+		EvalStack_PushFloat3(sampledDir); \
+		const BSDFEvent event = NONE; \
+		EvalStack_PushBSDFEvent(event); \
+		const float pdfW = 0.f; \
+		EvalStack_PushFloat(pdfW); \
+		return; \
+	}
 
 #endif

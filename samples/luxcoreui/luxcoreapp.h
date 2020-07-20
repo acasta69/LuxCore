@@ -39,6 +39,7 @@
 #include "filmchannelswindow.h"
 #include "filmradiancegroupswindow.h"
 #include "haltconditionswindow.h"
+#include "importancewindow.h"
 
 #define LA_ARRAYSIZE(_ARR)	((int)(sizeof(_ARR) / sizeof(*_ARR)))
 
@@ -48,6 +49,8 @@ public:
 	~LuxCoreApp();
 
 	void RunApp(luxcore::RenderState *startState = NULL, luxcore::Film *startFilm = NULL);
+
+	bool isGPURenderingAvailable() const { return isOpenCLAvailable || isCUDAAvailable; }
 
 	static void LogHandler(const char *msg);
 	static void ColoredLabelText(const ImVec4 &col, const char *label, const char *fmt, ...) IM_PRINTFARGS(3);
@@ -76,12 +79,14 @@ public:
 	friend class SamplerWindow;
 	friend class HaltConditionsWindow;
 	friend class StatsWindow;
+	friend class UserImportancePaintWindow;
 
 private:
 	typedef enum {
 		TOOL_CAMERA_EDIT,
 		TOOL_OBJECT_SELECTION,
-		TOOL_IMAGE_VIEW
+		TOOL_IMAGE_VIEW,
+		TOOL_USER_IMPORTANCE_PAINT
 	} AppToolType;
 
 	static void ToolCameraEditKeys(GLFWwindow *window, int key, int scanCode, int action, int mods);
@@ -128,7 +133,11 @@ private:
 	void MenuWindow();
 	void MainMenuBar();
 
+	void BakeAllSceneObjects();
+	
 	static LogWindow *currentLogWindow;
+
+	bool isOpenCLAvailable, isCUDAAvailable;
 
 	AcceleratorWindow acceleratorWindow;
 	EpsilonWindow epsilonWindow;
@@ -136,9 +145,7 @@ private:
 	FilmOutputsWindow filmOutputsWindow;
 	FilmRadianceGroupsWindow filmRadianceGroupsWindow;
 	LightStrategyWindow lightStrategyWindow;
-#if !defined(LUXRAYS_DISABLE_OPENCL)
 	OCLDeviceWindow oclDeviceWindow;
-#endif
 	PixelFilterWindow pixelFilterWindow;
 	RenderEngineWindow renderEngineWindow;
 	SamplerWindow samplerWindow;
@@ -146,6 +153,7 @@ private:
 	StatsWindow statsWindow;
 	LogWindow logWindow;
 	HelpWindow helpWindow;
+	UserImportancePaintWindow userImportancePaintWindow;
 
 	luxcore::RenderConfig *config;
 
@@ -155,8 +163,8 @@ private:
 	GLenum renderFrameBufferTexMinFilter, renderFrameBufferTexMagFilter;
 	GLuint backgroundLogoTexID;
 
-	unsigned int selectionFilmWidth, selectionFilmHeight;
-	float *selectionBuffer;
+	unsigned int renderImageWidth, renderImageHeight;
+	float *renderImageBuffer;
 	
 	GLFWwindow *window;
 

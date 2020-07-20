@@ -37,10 +37,10 @@ using namespace luxcore;
 #include <OpenImageIO/dassert.h>
 
 static void ConvertImage(const string &fileName) {
-	auto_ptr<ImageInput> in(ImageInput::open(fileName));
+	unique_ptr<ImageInput> in(ImageInput::open(fileName));
 	
 	const ImageSpec &spec = in->spec();
-	auto_ptr<u_char> pixels(new u_char[spec.width * spec.height * spec.nchannels] );
+	unique_ptr<u_char> pixels(new u_char[spec.width * spec.height * spec.nchannels] );
 
 	in->read_image(TypeDesc::UCHAR, pixels.get());
 
@@ -223,12 +223,6 @@ int main(int argc, char *argv[]) {
 		}
 
 		LA_LOG("Done.");
-
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-	} catch (cl::Error &err) {
-		LA_LOG("OpenCL ERROR: " << err.what() << "(" << oclErrorString(err.err()) << ")");
-		return EXIT_FAILURE;
-#endif
 	} catch (runtime_error &err) {
 		LA_LOG("RUNTIME ERROR: " << err.what());
 		return EXIT_FAILURE;

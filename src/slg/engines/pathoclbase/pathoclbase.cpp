@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -32,7 +32,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "luxrays/core/geometry/transform.h"
-#include "luxrays/core/oclintersectiondevice.h"
+#include "luxrays/devices/ocldevice.h"
 
 #include "slg/slg.h"
 #include "slg/engines/pathoclbase/pathoclbase.h"
@@ -41,6 +41,8 @@
 #include "slg/renderconfig.h"
 #include "slg/film/filters/filter.h"
 #include "slg/scene/scene.h"
+
+#include "luxcore/cfg.h"
 
 using namespace luxrays;
 using namespace slg;
@@ -54,7 +56,6 @@ PathOCLBaseRenderEngine::PathOCLBaseRenderEngine(const RenderConfig *rcfg,
 		const bool supportsNativeThreads) :	OCLRenderEngine(rcfg, supportsNativeThreads),
 		compiledScene(nullptr), pixelFilterDistribution(nullptr), oclSampler(nullptr),
 		oclPixelFilter(nullptr), photonGICache(nullptr) {
-	additionalKernelOptions = "";
 	writeKernelsToFile = false;
 
 	//--------------------------------------------------------------------------
@@ -64,26 +65,22 @@ PathOCLBaseRenderEngine::PathOCLBaseRenderEngine(const RenderConfig *rcfg,
 	vector<IntersectionDevice *> devs = ctx->AddIntersectionDevices(selectedDeviceDescs);
 
 	//--------------------------------------------------------------------------
-	// Add OpenCL devices
+	// Add CUDA devices
 	//--------------------------------------------------------------------------
 
-	SLG_LOG("OpenCL devices used:");
+	SLG_LOG("CUDA devices used:");
 	for (size_t i = 0; i < devs.size(); ++i) {
-		if (devs[i]->GetType() & DEVICE_TYPE_OPENCL_ALL) {
+		if (devs[i]->GetDeviceDesc()->GetType() & DEVICE_TYPE_CUDA_ALL) {
 			SLG_LOG("[" << devs[i]->GetName() << "]");
 			intersectionDevices.push_back(devs[i]);
 
-			OpenCLIntersectionDevice *oclIntersectionDevice = (OpenCLIntersectionDevice *)(devs[i]);
-			// Disable the support for hybrid rendering in order to not waste resources
-			oclIntersectionDevice->SetDataParallelSupport(false);
+			// Suggested compiler options: --use_fast_math
+			HardwareDevice *hwDev = dynamic_cast<HardwareDevice *>(devs[i]);
 
-			// Check if OpenCL 1.1 is available
-			SLG_LOG("  Device OpenCL version: " << oclIntersectionDevice->GetDeviceDesc()->GetOpenCLVersion());
-			if (!oclIntersectionDevice->GetDeviceDesc()->IsOpenCL_1_1()) {
-				// NVIDIA drivers report OpenCL 1.0 even if they are 1.1 so I just
-				// print a warning instead of throwing an exception
-				SLG_LOG("WARNING: OpenCL version 1.1 or better is required. Device " + devs[i]->GetName() + " may not work.");
-			}
+			vector<string> compileOpts;
+			compileOpts.push_back("--use_fast_math");
+
+			hwDev->SetAdditionalCompileOpts(compileOpts);
 		}
 	}
 
@@ -91,14 +88,42 @@ PathOCLBaseRenderEngine::PathOCLBaseRenderEngine(const RenderConfig *rcfg,
 	// Add OpenCL devices
 	//--------------------------------------------------------------------------
 
-	SLG_LOG("Native devices used: " << nativeRenderThreadCount);
+	SLG_LOG("OpenCL devices used:");
 	for (size_t i = 0; i < devs.size(); ++i) {
-		if (devs[i]->GetType() & DEVICE_TYPE_NATIVE_THREAD) {
+		if (devs[i]->GetDeviceDesc()->GetType() & DEVICE_TYPE_OPENCL_ALL) {
+			SLG_LOG("[" << devs[i]->GetName() << "]");
 			intersectionDevices.push_back(devs[i]);
 
-			// Disable the support for hybrid rendering in order to not waste resources
-			devs[i]->SetDataParallelSupport(false);
+			OpenCLIntersectionDevice *oclIntersectionDevice = (OpenCLIntersectionDevice *)(devs[i]);
+			OpenCLDeviceDescription *oclDeviceDesc = (OpenCLDeviceDescription *)oclIntersectionDevice->GetDeviceDesc();
+
+			// Check if OpenCL 1.1 is available
+			SLG_LOG("  Device OpenCL version: " << oclDeviceDesc->GetOpenCLVersion());
+			if (!oclDeviceDesc->IsOpenCL_1_1()) {
+				// NVIDIA drivers report OpenCL 1.0 even if they are 1.1 so I just
+				// print a warning instead of throwing an exception
+				SLG_LOG("WARNING: OpenCL version 1.1 or better is required. Device " + devs[i]->GetName() + " may not work.");
+			}
+
+			// Suggested compiler options: -cl-fast-relaxed-math -cl-mad-enable
+			HardwareDevice *hwDev = dynamic_cast<HardwareDevice *>(devs[i]);
+
+			vector<string> compileOpts;
+			compileOpts.push_back("-cl-fast-relaxed-math");
+			compileOpts.push_back("-cl-mad-enable");
+
+			hwDev->SetAdditionalCompileOpts(compileOpts);
 		}
+	}
+
+	//--------------------------------------------------------------------------
+	// Add Native devices
+	//--------------------------------------------------------------------------
+
+	SLG_LOG("Native devices used: " << nativeRenderThreadCount);
+	for (size_t i = 0; i < devs.size(); ++i) {
+		if (devs[i]->GetDeviceDesc()->GetType() & DEVICE_TYPE_NATIVE)
+			intersectionDevices.push_back(devs[i]);
 	}
 	
 	//--------------------------------------------------------------------------
@@ -110,8 +135,6 @@ PathOCLBaseRenderEngine::PathOCLBaseRenderEngine(const RenderConfig *rcfg,
 
 	SLG_LOG("Configuring " << nativeRenderThreadCount << " native render threads");
 	renderNativeThreads.resize(nativeRenderThreadCount, NULL);
-
-	usePixelAtomics = false;
 }
 
 PathOCLBaseRenderEngine::~PathOCLBaseRenderEngine() {
@@ -132,8 +155,30 @@ PathOCLBaseRenderEngine::~PathOCLBaseRenderEngine() {
 	delete oclPixelFilter;
 }
 
+void PathOCLBaseRenderEngine::InitGPUTaskConfiguration() {
+	// Scene configuration
+	taskConfig.scene.defaultVolumeIndex = compiledScene->defaultWorldVolumeIndex;
+
+	// Sampler configuration
+	taskConfig.sampler = *oclSampler;
+
+	// Path Tracer configuration
+	taskConfig.pathTracer = compiledScene->compiledPathTracer;
+
+	// Pixel filter configuration
+	taskConfig.pixelFilter = *oclPixelFilter;
+
+	// Film configuration
+	CompiledScene::CompileFilm(*film, taskConfig.film);
+	taskConfig.film.usePixelAtomics = renderConfig->GetProperty("pathocl.pixelatomics.enable").Get<bool>();
+	if ((taskConfig.sampler.type == slg::ocl::SOBOL) && (taskConfig.sampler.sobol.overlapping > 1)) {
+		// I need to use atomics in this case
+		taskConfig.film.usePixelAtomics = true;
+	}
+}
+
 void PathOCLBaseRenderEngine::InitPixelFilterDistribution() {
-	auto_ptr<Filter> pixelFilter(renderConfig->AllocPixelFilter());
+	unique_ptr<Filter> pixelFilter(renderConfig->AllocPixelFilter());
 
 	// Compile sample distribution
 	delete[] pixelFilterDistribution;
@@ -144,8 +189,74 @@ void PathOCLBaseRenderEngine::InitPixelFilterDistribution() {
 
 void PathOCLBaseRenderEngine::InitFilm() {
 	film->AddChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED);
+
+	// pathTracer has not yet been initialized
+	const bool hybridBackForwardEnable = renderConfig->cfg.Get(PathTracer::GetDefaultProps().
+			Get("path.hybridbackforward.enable")).Get<bool>();
+	if (hybridBackForwardEnable)
+		film->AddChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
+
 	film->SetRadianceGroupCount(renderConfig->scene->lightDefs.GetLightGroupCount());
 	film->Init();
+}
+
+string PathOCLBaseRenderEngine::GetCachedKernelsHash(const RenderConfig &renderConfig) {
+	const string renderEngineType = renderConfig.GetProperty("renderengine.type").Get<string>();
+
+	const float epsilonMin = renderConfig.GetProperty("scene.epsilon.min").Get<float>();
+	const float epsilonMax = renderConfig.GetProperty("scene.epsilon.max").Get<float>();
+		
+	const Properties &cfg = renderConfig.cfg;
+	const bool usePixelAtomics = cfg.Get(Property("pathocl.pixelatomics.enable")(false)).Get<bool>();
+	const bool useCPUs = cfg.Get(GetDefaultProps().Get("opencl.cpu.use")).Get<bool>();
+	const bool useGPUs = cfg.Get(GetDefaultProps().Get("opencl.gpu.use")).Get<bool>();
+	const string oclDeviceConfig = cfg.Get(GetDefaultProps().Get("opencl.devices.select")).Get<string>();
+
+	stringstream ssParams;
+	ssParams.precision(6);
+	ssParams << scientific <<
+			renderEngineType << "##" <<
+			epsilonMin << "##" <<
+			epsilonMax << "##" <<
+			usePixelAtomics << "##" <<
+			useCPUs << "##" <<
+			useGPUs << "##" <<
+			oclDeviceConfig;
+
+	const string kernelSource = PathOCLBaseOCLRenderThread::GetKernelSources();
+
+	return oclKernelPersistentCache::HashString(ssParams.str()) + "-" + oclKernelPersistentCache::HashString(kernelSource);
+}
+
+void PathOCLBaseRenderEngine::SetCachedKernels(const RenderConfig &renderConfig) {
+	const string kernelHash = GetCachedKernelsHash(renderConfig);
+
+	const boost::filesystem::path dirPath = oclKernelPersistentCache::GetCacheDir("LUXCORE_" LUXCORE_VERSION_MAJOR "." LUXCORE_VERSION_MINOR);
+	const boost::filesystem::path filePath = dirPath / (kernelHash + ".ck");
+	const string fileName = filePath.generic_string();
+
+	if (!boost::filesystem::exists(filePath)) {
+		// Create an empty file
+		boost::filesystem::create_directories(dirPath);
+
+		// The use of boost::filesystem::path is required for UNICODE support: fileName
+		// is supposed to be UTF-8 encoded.
+		boost::filesystem::ofstream file(boost::filesystem::path(fileName),
+				boost::filesystem::ofstream::out |
+				boost::filesystem::ofstream::binary |
+				boost::filesystem::ofstream::trunc);
+
+		file.close();
+	}
+}
+
+bool PathOCLBaseRenderEngine::HasCachedKernels(const RenderConfig &renderConfig) {
+	const string kernelHash = GetCachedKernelsHash(renderConfig);
+
+	const boost::filesystem::path dirPath = oclKernelPersistentCache::GetCacheDir("LUXCORE_" LUXCORE_VERSION_MAJOR "." LUXCORE_VERSION_MINOR);
+	const boost::filesystem::path filePath = dirPath / (kernelHash + ".ck");
+
+	return boost::filesystem::exists(filePath);
 }
 
 void PathOCLBaseRenderEngine::StartLockLess() {
@@ -175,38 +286,45 @@ void PathOCLBaseRenderEngine::StartLockLess() {
 		// Look for the max. page size allowed
 		maxMemPageSize = std::numeric_limits<size_t>::max();
 		for (u_int i = 0; i < intersectionDevices.size(); ++i) {
-			if (intersectionDevices[i]->GetType() & DEVICE_TYPE_OPENCL_ALL)
+			if (intersectionDevices[i]->GetDeviceDesc()->GetType() & DEVICE_TYPE_OPENCL_ALL)
 				maxMemPageSize = Min(maxMemPageSize, ((OpenCLIntersectionDevice *)(intersectionDevices[i]))->GetDeviceDesc()->GetMaxMemoryAllocSize());
 		}
 	}
 	SLG_LOG("[PathOCLBaseRenderEngine] OpenCL max. page memory size: " << maxMemPageSize / 1024 << "Kbytes");
-
-	// Suggested compiler options: -cl-fast-relaxed-math -cl-strict-aliasing -cl-mad-enable
-	additionalKernelOptions = cfg.Get(Property("opencl.kernel.options")("")).Get<string>();
+	
 	writeKernelsToFile = cfg.Get(Property("opencl.kernel.writetofile")(false)).Get<bool>();
 
 	//--------------------------------------------------------------------------
 	// Allocate PhotonGICache if enabled
 	//--------------------------------------------------------------------------
 
-	if (GetType() != RTPATHOCL) {
+	// note: photonGICache could have been restored from the render state
+	if ((GetType() != RTPATHOCL) && !photonGICache) {
 		delete photonGICache;
 		photonGICache = PhotonGICache::FromProperties(renderConfig->scene, cfg);
 		
 		// photonGICache will be nullptr if the cache is disabled
 		if (photonGICache)
-			photonGICache->Preprocess();
+			photonGICache->Preprocess(renderNativeThreads.size() + renderOCLThreads.size());
 	}
+
+	pathTracer.SetPhotonGICache(photonGICache);
 
 	//--------------------------------------------------------------------------
 	// Compile the scene
 	//--------------------------------------------------------------------------
 
-	compiledScene = new CompiledScene(renderConfig->scene, photonGICache);
+	compiledScene = new CompiledScene(renderConfig->scene, &pathTracer);
 	compiledScene->SetMaxMemPageSize(maxMemPageSize);
 	compiledScene->EnableCode(cfg.Get(Property("opencl.code.alwaysenabled")("")).Get<string>());
 	compiledScene->Compile();
 
+	//--------------------------------------------------------------------------
+	// Compile the configuration
+	//--------------------------------------------------------------------------
+
+	InitGPUTaskConfiguration();
+	
 	//--------------------------------------------------------------------------
 	// Start OpenCL render threads
 	//--------------------------------------------------------------------------
@@ -215,12 +333,18 @@ void PathOCLBaseRenderEngine::StartLockLess() {
 	for (size_t i = 0; i < oclRenderThreadCount; ++i) {
 		if (!renderOCLThreads[i]) {
 			renderOCLThreads[i] = CreateOCLThread(i,
-					(OpenCLIntersectionDevice *)(intersectionDevices[i]));
+					(HardwareIntersectionDevice *)(intersectionDevices[i]));
 		}
 	}
 
-	for (size_t i = 0; i < renderOCLThreads.size(); ++i)
+	for (size_t i = 0; i < renderOCLThreads.size(); ++i) {
+		renderOCLThreads[i]->intersectionDevice->PushThreadCurrentDevice();
 		renderOCLThreads[i]->Start();
+		renderOCLThreads[i]->intersectionDevice->PopThreadCurrentDevice();
+	}
+
+	// I know kernels has been compiled at this point
+	SetCachedKernels(*renderConfig);
 
 	//--------------------------------------------------------------------------
 	// Start native render threads
@@ -230,7 +354,7 @@ void PathOCLBaseRenderEngine::StartLockLess() {
 	for (size_t i = 0; i < nativeRenderThreadCount; ++i) {
 		if (!renderNativeThreads[i]) {
 			renderNativeThreads[i] = CreateNativeThread(i,
-					(NativeThreadIntersectionDevice *)(intersectionDevices[i + oclRenderThreadCount]));
+					(NativeIntersectionDevice *)(intersectionDevices[i + oclRenderThreadCount]));
 		}
 	}
 
@@ -253,8 +377,11 @@ void PathOCLBaseRenderEngine::StopLockLess() {
             renderNativeThreads[i]->Stop();
     }
 	for (size_t i = 0; i < renderOCLThreads.size(); ++i) {
-        if (renderOCLThreads[i])
+        if (renderOCLThreads[i]) {
+			renderOCLThreads[i]->intersectionDevice->PushThreadCurrentDevice();
             renderOCLThreads[i]->Stop();
+			renderOCLThreads[i]->intersectionDevice->PopThreadCurrentDevice();
+		}
     }
 
 	delete compiledScene;
@@ -273,15 +400,21 @@ void PathOCLBaseRenderEngine::BeginSceneEditLockLess() {
 
 	for (size_t i = 0; i < renderNativeThreads.size(); ++i)
 		renderNativeThreads[i]->BeginSceneEdit();
-	for (size_t i = 0; i < renderOCLThreads.size(); ++i)
+	for (size_t i = 0; i < renderOCLThreads.size(); ++i) {
+		renderOCLThreads[i]->intersectionDevice->PushThreadCurrentDevice();
 		renderOCLThreads[i]->BeginSceneEdit();
+		renderOCLThreads[i]->intersectionDevice->PopThreadCurrentDevice();
+	}
 }
 
 void PathOCLBaseRenderEngine::EndSceneEditLockLess(const EditActionList &editActions) {
 	compiledScene->Recompile(editActions);
 
-	for (size_t i = 0; i < renderOCLThreads.size(); ++i)
+	for (size_t i = 0; i < renderOCLThreads.size(); ++i) {
+		renderOCLThreads[i]->intersectionDevice->PushThreadCurrentDevice();
 		renderOCLThreads[i]->EndSceneEdit(editActions);
+		renderOCLThreads[i]->intersectionDevice->PopThreadCurrentDevice();
+	}
 	for (size_t i = 0; i < renderNativeThreads.size(); ++i)
 		renderNativeThreads[i]->EndSceneEdit(editActions);
 }

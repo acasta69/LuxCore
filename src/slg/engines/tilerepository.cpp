@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -92,16 +92,17 @@ void Tile::InitTileFilm(const Film &film, Film **tileFilm) {
 	(*tileFilm)->RemoveChannel(Film::CONVERGENCE);
 	(*tileFilm)->RemoveChannel(Film::MATERIAL_ID_COLOR);
 	(*tileFilm)->RemoveChannel(Film::ALBEDO);
+	(*tileFilm)->RemoveChannel(Film::NOISE);
 
 	// Build an image pipeline with only an auto-linear tone mapping and
 	// gamma correction.
-	auto_ptr<ImagePipeline> imagePipeline(new ImagePipeline());
+	unique_ptr<ImagePipeline> imagePipeline(new ImagePipeline());
 	imagePipeline->AddPlugin(new LinearToneMap(1.f));
 	imagePipeline->AddPlugin(new GammaCorrectionPlugin(2.2f));
 	(*tileFilm)->SetImagePipelines(imagePipeline.release());
 
 	// Disable OpenCL
-	(*tileFilm)->oclEnable = false;
+	(*tileFilm)->hwEnable = false;
 	
 	// Disable denoiser statistics collection
 	(*tileFilm)->GetDenoiser().SetEnabled(false);
@@ -167,9 +168,6 @@ void Tile::AddPass(Film &tileFilm, const u_int passRendered) {
 				CheckConvergence();
 			}
 		}
-
-		if ((tileRepository->maxPassCount > 0) && (pass >= tileRepository->maxPassCount))
-			done = true;
 	} else
 		done = true;
 }
@@ -266,7 +264,7 @@ TileWork::TileWork() : tile(nullptr) {
 }
 
 TileWork::TileWork(Tile *t) {
-	Init(tile);
+	Init(t);
 }
 
 void TileWork::Init(Tile *t) {
@@ -275,10 +273,6 @@ void TileWork::Init(Tile *t) {
 
 	multipassIndexToRender = tile->tileRepository->multipassRenderingIndex;
 	passToRender = tile->pass + tile->pendingPasses;
-}
-
-u_int TileWork::GetTileSeed() const {
-	return tile->tileIndex + (multipassIndexToRender << 16) + 1;
 }
 
 void TileWork::AddPass(Film &tileFilm) {		
@@ -295,12 +289,12 @@ TileRepository::TileRepository(const u_int tileW, const u_int tileH) {
 	tileWidth = tileW;
 	tileHeight = tileH;
 
-	maxPassCount = 0;
 	enableMultipassRendering = false;
 	convergenceTestThreshold = 6.f / 256.f;
 	convergenceTestThresholdReduction = 0.f;
 	convergenceTestWarmUpSamples = 32;
 	enableRenderingDonePrint = true;
+	enableFirstPassClear = false;
 
 	done = false;
 	filmTotalYValue = 0.f;
@@ -527,11 +521,20 @@ bool TileRepository::NextTile(Film *film, boost::mutex *filmMutex,
 		// Add the tile also to the global film
 		boost::unique_lock<boost::mutex> lock(*filmMutex);
 
-		film->AddFilm(*tileFilm,
-				0, 0,
-				Min(tileWidth, film->GetWidth() - tile->coord.x),
-				Min(tileHeight, film->GetHeight() - tile->coord.y),
-				tile->coord.x, tile->coord.y);
+		// This allow to avoid to have to clear the film
+		if (enableFirstPassClear && (tileWork.passToRender == 1)) {
+			film->SetFilm(*tileFilm,
+					0, 0,
+					Min(tileWidth, film->GetWidth() - tile->coord.x),
+					Min(tileHeight, film->GetHeight() - tile->coord.y),
+					tile->coord.x, tile->coord.y);
+		} else {
+			film->AddFilm(*tileFilm,
+					0, 0,
+					Min(tileWidth, film->GetWidth() - tile->coord.x),
+					Min(tileHeight, film->GetHeight() - tile->coord.y),
+					tile->coord.x, tile->coord.y);
+		}
 	}
 
 	// For the support of film halt conditions
@@ -639,9 +642,8 @@ TileRepository *TileRepository::FromProperties(const luxrays::Properties &cfg) {
 		tileWidth = tileHeight = Max(8u, cfg.Get(GetDefaultProps().Get("tile.size")).Get<u_int>());
 	tileWidth = Max(8u, cfg.Get(Property("tile.size.x")(tileWidth)).Get<u_int>());
 	tileHeight = Max(8u, cfg.Get(Property("tile.size.y")(tileHeight)).Get<u_int>());
-	auto_ptr<TileRepository> tileRepository(new TileRepository(tileWidth, tileHeight));
+	unique_ptr<TileRepository> tileRepository(new TileRepository(tileWidth, tileHeight));
 
-	tileRepository->maxPassCount = cfg.Get(Property("batch.haltdebug")(0)).Get<u_int>();
 	tileRepository->enableMultipassRendering = cfg.Get(GetDefaultProps().Get("tile.multipass.enable")).Get<bool>();
 
 	if (cfg.IsDefined("tile.multipass.convergencetest.threshold"))

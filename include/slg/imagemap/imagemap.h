@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -25,11 +25,13 @@
 #include <limits>
 
 #include "luxrays/luxrays.h"
+#include "luxrays/utils/ocl.h"
 #include "luxrays/core/color/color.h"
 #include "luxrays/core/geometry/uv.h"
 #include "luxrays/core/namedobject.h"
 #include "luxrays/utils/properties.h"
 #include "luxrays/utils/serializationutils.h"
+#include "luxrays/utils/ocl.h"
 #include "slg/utils/halfserialization.h"
 
 namespace slg {
@@ -557,7 +559,8 @@ public:
 		ALPHA,
 		MEAN,
 		WEIGHTED_MEAN,
-		RGB
+		RGB,
+		DIRECTX2OPENGL_NORMALMAP
 	} ChannelSelectionType;
 	
 	typedef enum {
@@ -812,6 +815,9 @@ public:
 	float GetAlpha(const luxrays::UV &uv) const { return pixelStorage->GetAlpha(uv); }
 	luxrays::UV GetDuv(const luxrays::UV &uv) const { return pixelStorage->GetDuv(uv); }
 
+	// Note: Resize() uses OpenImageIO Resize and it can return negative values
+	// very high floating point pixel values (it is a classic filtering problem).
+	// So Resample() should be used instead of Resize() for HDR images.
 	void Resize(const u_int newWidth, const u_int newHeight);
 
 	std::string GetFileExtension() const;

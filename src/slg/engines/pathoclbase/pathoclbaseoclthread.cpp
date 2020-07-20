@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -23,7 +23,7 @@
 
 #include "luxrays/core/geometry/transform.h"
 #include "luxrays/utils/ocl.h"
-#include "luxrays/core/oclintersectiondevice.h"
+#include "luxrays/devices/ocldevice.h"
 #include "luxrays/kernels/kernels.h"
 
 #include "luxcore/cfg.h"
@@ -43,7 +43,7 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
-		OpenCLIntersectionDevice *device, PathOCLBaseRenderEngine *re) {
+		HardwareIntersectionDevice *device, PathOCLBaseRenderEngine *re) {
 	threadIndex = index;
 	intersectionDevice = device;
 	renderEngine = re;
@@ -58,7 +58,11 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 
 	// Scene buffers
 	materialsBuff = nullptr;
+	materialEvalOpsBuff = nullptr;
+	materialEvalStackBuff = nullptr;
 	texturesBuff = nullptr;
+	textureEvalOpsBuff = nullptr;
+	textureEvalStackBuff = nullptr;
 	meshDescsBuff = nullptr;
 	scnObjsBuff = nullptr;
 	lightsBuff = nullptr;
@@ -66,50 +70,49 @@ PathOCLBaseOCLRenderThread::PathOCLBaseOCLRenderThread(const u_int index,
 	lightsDistributionBuff = nullptr;
 	infiniteLightSourcesDistributionBuff = nullptr;
 	dlscAllEntriesBuff = nullptr;
-	dlscDistributionIndexToLightIndexBuff = nullptr;
 	dlscDistributionsBuff = nullptr;
 	dlscBVHNodesBuff = nullptr;
+	elvcAllEntriesBuff = nullptr;
+	elvcDistributionsBuff = nullptr;
+	elvcTileDistributionOffsetsBuff = nullptr;
+	elvcBVHNodesBuff = nullptr;
 	envLightDistributionsBuff = nullptr;
 	vertsBuff = nullptr;
 	normalsBuff = nullptr;
+	triNormalsBuff = nullptr;
 	uvsBuff = nullptr;
 	colsBuff = nullptr;
 	alphasBuff = nullptr;
+	vertexAOVBuff = nullptr;
+	triAOVBuff = nullptr;
 	trianglesBuff = nullptr;
+	interpolatedTransformsBuff = nullptr;
 	cameraBuff = nullptr;
 	lightIndexOffsetByMeshIndexBuff = nullptr;
 	lightIndexByTriIndexBuff = nullptr;
 	imageMapDescsBuff = nullptr;
-	// OpenCL memory buffers
+	pgicRadiancePhotonsBuff = nullptr;
+	pgicRadiancePhotonsValuesBuff = nullptr;
+	pgicRadiancePhotonsBVHNodesBuff = nullptr;
+	pgicCausticPhotonsBuff = nullptr;
+	pgicCausticPhotonsBVHNodesBuff = nullptr;
+
+	// OpenCL task related buffers
 	raysBuff = nullptr;
 	hitsBuff = nullptr;
+	taskConfigBuff = nullptr;
 	tasksBuff = nullptr;
 	tasksDirectLightBuff = nullptr;
 	tasksStateBuff = nullptr;
 	samplerSharedDataBuff = nullptr;
 	samplesBuff = nullptr;
 	sampleDataBuff = nullptr;
+	sampleResultsBuff = nullptr;
 	taskStatsBuff = nullptr;
-	pathVolInfosBuff = nullptr;
+	eyePathInfosBuff = nullptr;
 	directLightVolInfosBuff = nullptr;
 	pixelFilterBuff = nullptr;
-	pgicRadiancePhotonsBuff = nullptr;
-	pgicRadiancePhotonsBVHNodesBuff = nullptr;
-	pgicCausticPhotonsBuff = nullptr;
-	pgicCausticPhotonsBVHNodesBuff = nullptr;
-	pgicCausticNearPhotonsBuff = nullptr;
 
-	// Check the kind of kernel cache to use
-	string type = renderEngine->renderConfig->cfg.Get(Property("opencl.kernelcache")("PERSISTENT")).Get<string>();
-	if (type == "PERSISTENT")
-		kernelCache = new oclKernelPersistentCache("LUXCORE_" LUXCORE_VERSION_MAJOR "." LUXCORE_VERSION_MINOR);
-	else if (type == "VOLATILE")
-		kernelCache = new oclKernelVolatileCache();
-	else if (type == "NONE")
-		kernelCache = new oclKernelDummyCache();
-	else
-		throw runtime_error("Unknown opencl.kernelcache type: " + type);
-	
 	// OpenCL kernels
 	initSeedKernel = nullptr;
 	initKernel = nullptr;
@@ -138,7 +141,6 @@ PathOCLBaseOCLRenderThread::~PathOCLBaseOCLRenderThread() {
 	FreeThreadFilms();
 
 	delete filmClearKernel;
-	delete kernelCache;
 	delete initSeedKernel;
 	delete initKernel;
 	delete advancePathsKernel_MK_RT_NEXT_VERTEX;
@@ -171,53 +173,68 @@ void PathOCLBaseOCLRenderThread::Stop() {
 	StopRenderThread();
 
 	// Transfer the films
-	TransferThreadFilms(intersectionDevice->GetOpenCLQueue());
+	TransferThreadFilms(intersectionDevice);
 	FreeThreadFilmsOCLBuffers();
 
 	// Scene buffers
-	FreeOCLBuffer(&materialsBuff);
-	FreeOCLBuffer(&texturesBuff);
-	FreeOCLBuffer(&meshDescsBuff);
-	FreeOCLBuffer(&scnObjsBuff);
-	FreeOCLBuffer(&normalsBuff);
-	FreeOCLBuffer(&uvsBuff);
-	FreeOCLBuffer(&colsBuff);
-	FreeOCLBuffer(&alphasBuff);
-	FreeOCLBuffer(&trianglesBuff);
-	FreeOCLBuffer(&vertsBuff);
-	FreeOCLBuffer(&lightsBuff);
-	FreeOCLBuffer(&envLightIndicesBuff);
-	FreeOCLBuffer(&lightsDistributionBuff);
-	FreeOCLBuffer(&infiniteLightSourcesDistributionBuff);
-	FreeOCLBuffer(&dlscAllEntriesBuff);
-	FreeOCLBuffer(&dlscDistributionIndexToLightIndexBuff);
-	FreeOCLBuffer(&dlscDistributionsBuff);
-	FreeOCLBuffer(&dlscBVHNodesBuff);
-	FreeOCLBuffer(&envLightDistributionsBuff);
-	FreeOCLBuffer(&cameraBuff);
-	FreeOCLBuffer(&lightIndexOffsetByMeshIndexBuff);
-	FreeOCLBuffer(&lightIndexByTriIndexBuff);
-	FreeOCLBuffer(&imageMapDescsBuff);
+	intersectionDevice->FreeBuffer(&materialsBuff);
+	intersectionDevice->FreeBuffer(&materialEvalOpsBuff);
+	intersectionDevice->FreeBuffer(&materialEvalStackBuff);
+	intersectionDevice->FreeBuffer(&texturesBuff);
+	intersectionDevice->FreeBuffer(&textureEvalOpsBuff);
+	intersectionDevice->FreeBuffer(&textureEvalStackBuff);
+	intersectionDevice->FreeBuffer(&meshDescsBuff);
+	intersectionDevice->FreeBuffer(&scnObjsBuff);
+	intersectionDevice->FreeBuffer(&normalsBuff);
+	intersectionDevice->FreeBuffer(&triNormalsBuff);
+	intersectionDevice->FreeBuffer(&uvsBuff);
+	intersectionDevice->FreeBuffer(&colsBuff);
+	intersectionDevice->FreeBuffer(&alphasBuff);
+	intersectionDevice->FreeBuffer(&triAOVBuff);
+	intersectionDevice->FreeBuffer(&trianglesBuff);
+	intersectionDevice->FreeBuffer(&interpolatedTransformsBuff);
+	intersectionDevice->FreeBuffer(&vertsBuff);
+	intersectionDevice->FreeBuffer(&lightsBuff);
+	intersectionDevice->FreeBuffer(&envLightIndicesBuff);
+	intersectionDevice->FreeBuffer(&lightsDistributionBuff);
+	intersectionDevice->FreeBuffer(&infiniteLightSourcesDistributionBuff);
+	intersectionDevice->FreeBuffer(&dlscAllEntriesBuff);
+	intersectionDevice->FreeBuffer(&dlscDistributionsBuff);
+	intersectionDevice->FreeBuffer(&dlscBVHNodesBuff);
+	intersectionDevice->FreeBuffer(&elvcAllEntriesBuff);
+	intersectionDevice->FreeBuffer(&elvcDistributionsBuff);
+	intersectionDevice->FreeBuffer(&elvcTileDistributionOffsetsBuff);
+	intersectionDevice->FreeBuffer(&elvcBVHNodesBuff);
+	intersectionDevice->FreeBuffer(&envLightDistributionsBuff);
+	intersectionDevice->FreeBuffer(&cameraBuff);
+	intersectionDevice->FreeBuffer(&lightIndexOffsetByMeshIndexBuff);
+	intersectionDevice->FreeBuffer(&lightIndexByTriIndexBuff);
+	intersectionDevice->FreeBuffer(&imageMapDescsBuff);
+
 	for (u_int i = 0; i < imageMapsBuff.size(); ++i)
-		FreeOCLBuffer(&imageMapsBuff[i]);
+		intersectionDevice->FreeBuffer(&imageMapsBuff[i]);
 	imageMapsBuff.resize(0);
-	FreeOCLBuffer(&raysBuff);
-	FreeOCLBuffer(&hitsBuff);
-	FreeOCLBuffer(&tasksBuff);
-	FreeOCLBuffer(&tasksDirectLightBuff);
-	FreeOCLBuffer(&tasksStateBuff);
-	FreeOCLBuffer(&samplerSharedDataBuff);
-	FreeOCLBuffer(&samplesBuff);
-	FreeOCLBuffer(&sampleDataBuff);
-	FreeOCLBuffer(&taskStatsBuff);
-	FreeOCLBuffer(&pathVolInfosBuff);
-	FreeOCLBuffer(&directLightVolInfosBuff);
-	FreeOCLBuffer(&pixelFilterBuff);
-	FreeOCLBuffer(&pgicRadiancePhotonsBuff);
-	FreeOCLBuffer(&pgicRadiancePhotonsBVHNodesBuff);
-	FreeOCLBuffer(&pgicCausticPhotonsBuff);
-	FreeOCLBuffer(&pgicCausticPhotonsBVHNodesBuff);
-	FreeOCLBuffer(&pgicCausticNearPhotonsBuff);
+	intersectionDevice->FreeBuffer(&pgicRadiancePhotonsBuff);
+	intersectionDevice->FreeBuffer(&pgicRadiancePhotonsValuesBuff);
+	intersectionDevice->FreeBuffer(&pgicRadiancePhotonsBVHNodesBuff);
+	intersectionDevice->FreeBuffer(&pgicCausticPhotonsBuff);
+	intersectionDevice->FreeBuffer(&pgicCausticPhotonsBVHNodesBuff);
+
+	// OpenCL task related buffers
+	intersectionDevice->FreeBuffer(&raysBuff);
+	intersectionDevice->FreeBuffer(&hitsBuff);
+	intersectionDevice->FreeBuffer(&taskConfigBuff);
+	intersectionDevice->FreeBuffer(&tasksBuff);
+	intersectionDevice->FreeBuffer(&tasksDirectLightBuff);
+	intersectionDevice->FreeBuffer(&tasksStateBuff);
+	intersectionDevice->FreeBuffer(&samplerSharedDataBuff);
+	intersectionDevice->FreeBuffer(&samplesBuff);
+	intersectionDevice->FreeBuffer(&sampleDataBuff);
+	intersectionDevice->FreeBuffer(&sampleResultsBuff);
+	intersectionDevice->FreeBuffer(&taskStatsBuff);
+	intersectionDevice->FreeBuffer(&eyePathInfosBuff);
+	intersectionDevice->FreeBuffer(&directLightVolInfosBuff);
+	intersectionDevice->FreeBuffer(&pixelFilterBuff);
 
 	started = false;
 
@@ -291,11 +308,6 @@ void PathOCLBaseOCLRenderThread::EndSceneEdit(const EditActionList &editActions)
 		InitPhotonGI();
 	}
 
-	// A material types edit can enable/disable PARAM_HAS_PASSTHROUGH parameter
-	// and change the size of the structure allocated
-	if (editActions.Has(MATERIAL_TYPES_EDIT))
-		AdditionalInit();
-
 	//--------------------------------------------------------------------------
 	// Recompile Kernels if required
 	//--------------------------------------------------------------------------
@@ -316,10 +328,8 @@ void PathOCLBaseOCLRenderThread::EndSceneEdit(const EditActionList &editActions)
 		// Execute initialization kernels
 		//----------------------------------------------------------------------
 
-		cl::CommandQueue &oclQueue = intersectionDevice->GetOpenCLQueue();
-
 		// Clear the frame buffers
-		ClearThreadFilms(oclQueue);
+		ClearThreadFilms();
 	}
 
 	// Reset statistics in order to be more accurate
@@ -348,16 +358,16 @@ void PathOCLBaseOCLRenderThread::IncThreadFilms() {
 			threadFilmSubRegion);
 }
 
-void PathOCLBaseOCLRenderThread::ClearThreadFilms(cl::CommandQueue &oclQueue) {
+void PathOCLBaseOCLRenderThread::ClearThreadFilms() {
 	// Clear all thread films
 	BOOST_FOREACH(ThreadFilm *threadFilm, threadFilms)
-		threadFilm->ClearFilm(oclQueue, *filmClearKernel, filmClearWorkGroupSize);
+		threadFilm->ClearFilm(intersectionDevice, filmClearKernel, filmClearWorkGroupSize);
 }
 
-void PathOCLBaseOCLRenderThread::TransferThreadFilms(cl::CommandQueue &oclQueue) {
+void PathOCLBaseOCLRenderThread::TransferThreadFilms(HardwareIntersectionDevice *intersectionDevice) {
 	// Clear all thread films
 	BOOST_FOREACH(ThreadFilm *threadFilm, threadFilms)
-		threadFilm->RecvFilm(oclQueue);
+		threadFilm->RecvFilm(intersectionDevice);
 }
 
 void PathOCLBaseOCLRenderThread::FreeThreadFilmsOCLBuffers() {

@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -20,6 +20,7 @@
 #define	_SLG_CONSTANTINFINITELIGHT_H
 
 #include "slg/lights/light.h"
+#include "slg/lights/visibility/envlightvisibilitycache.h"
 
 namespace slg {
 
@@ -33,25 +34,27 @@ public:
 	virtual ~ConstantInfiniteLight();
 
 	virtual void Preprocess() { }
-	void GetPreprocessedData(const luxrays::Distribution2D **visibilityDistribution) const;
+	void GetPreprocessedData(const EnvLightVisibilityCache **visibilityMapCache) const;
 
-	virtual void UpdateVisibilityMap(const Scene *scene);
+	virtual void UpdateVisibilityMap(const Scene *scene, const bool useRTMode);
 
 	virtual LightSourceType GetType() const { return TYPE_IL_CONSTANT; }
 	virtual float GetPower(const Scene &scene) const;
 
 	virtual luxrays::Spectrum Emit(const Scene &scene,
-		const float u0, const float u1, const float u2, const float u3, const float passThroughEvent,
-		luxrays::Point *pos, luxrays::Vector *dir,
-		float *emissionPdfW, float *directPdfA = NULL, float *cosThetaAtLight = NULL) const;
+		const float time, const float u0, const float u1,
+		const float u2, const float u3, const float passThroughEvent,
+		luxrays::Ray &ray, float &emissionPdfW,
+		float *directPdfA = NULL, float *cosThetaAtLight = NULL) const;
 
-    virtual luxrays::Spectrum Illuminate(const Scene &scene, const luxrays::Point &p,
-		const float u0, const float u1, const float passThroughEvent,
-        luxrays::Vector *dir, float *distance, float *directPdfW,
+    virtual luxrays::Spectrum Illuminate(const Scene &scene, const BSDF &bsdf,
+		const float time, const float u0, const float u1, const float passThroughEvent,
+        luxrays::Ray &shadowRay, float &directPdfW,
 		float *emissionPdfW = NULL, float *cosThetaAtLight = NULL) const;
 
-	virtual luxrays::Spectrum GetRadiance(const Scene &scene, const luxrays::Vector &dir,
-			float *directPdfA = NULL, float *emissionPdfW = NULL) const;
+	virtual luxrays::Spectrum GetRadiance(const Scene &scene,
+		const BSDF *bsdf, const luxrays::Vector &dir,
+		float *directPdfA = NULL, float *emissionPdfW = NULL) const;
 	virtual luxrays::UV GetEnvUV(const luxrays::Vector &dir) const;
 
 	virtual luxrays::Properties ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const;
@@ -63,8 +66,12 @@ public:
 	u_int visibilityMapSamples, visibilityMapMaxDepth;
 	bool useVisibilityMap;
 
+	// Visibility map cache options
+	ELVCParams visibilityMapCacheParams;
+	bool useVisibilityMapCache;
+
 private:
-	luxrays::Distribution2D *visibilityDistribution;
+	EnvLightVisibilityCache *visibilityMapCache;
 };
 
 }

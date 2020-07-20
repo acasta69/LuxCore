@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -197,14 +197,17 @@ void LightSourceDefinitions::Preprocess(const Scene *scene, const bool useRTMode
 			envLightSources.push_back((EnvLightSource *)l);
 
 		TriangleLight *tl = dynamic_cast<TriangleLight *>(l);
-		if (tl)
+		if (tl) {
 			intersectableLightSources.push_back(tl);
+
+			tl->meshIndex = scene->objDefs.GetSceneObjectIndex(tl->sceneObject);
+		}
 
 		++i;
 	}
 
 	// Build 2 tables to go from mesh index and triangle index to light index
-	lightIndexOffsetByMeshIndex.resize(scene->objDefs.GetSize(), NULL_INDEX);
+	lightIndexOffsetByMeshIndex.resize(scene->objDefs.GetSize());
 	lightIndexByTriIndex.clear();
 	for (u_int meshIndex = 0; meshIndex < scene->objDefs.GetSize(); ++meshIndex) {
 		const SceneObject *so = scene->objDefs.GetSceneObject(meshIndex);
@@ -218,7 +221,8 @@ void LightSourceDefinitions::Preprocess(const Scene *scene, const bool useRTMode
 
 				lightIndexByTriIndex.push_back(light2indexLookupAccel[GetLightSource(lightName)]);
 			}
-		}
+		} else
+			lightIndexOffsetByMeshIndex[meshIndex] = NULL_INDEX;
 	}
 
 	// I need to check all volume definitions for radiance group usage too
@@ -242,7 +246,7 @@ void LightSourceDefinitions::Preprocess(const Scene *scene, const bool useRTMode
 	//SLG_LOG("Light preprocessing time: " << (end - start) / 1000.0 << "ms");
 }
 
-void LightSourceDefinitions::UpdateVisibilityMaps(const Scene *scene) {
+void LightSourceDefinitions::UpdateVisibilityMaps(const Scene *scene, const bool useRTMode) {
 	// This check is required because FILESAVER engine doesn't
 	// initialize any accelerator
 	if (!scene->dataSet->GetAccelerator())
@@ -250,5 +254,5 @@ void LightSourceDefinitions::UpdateVisibilityMaps(const Scene *scene) {
 
 	// Build visibility maps for Env. lights
 	BOOST_FOREACH(EnvLightSource *envLight, GetEnvLightSources())
-		envLight->UpdateVisibilityMap(scene);
+		envLight->UpdateVisibilityMap(scene, useRTMode);
 }

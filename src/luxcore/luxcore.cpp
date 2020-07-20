@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -22,7 +22,6 @@
 #include <boost/thread/mutex.hpp>
 
 #include "luxrays/core/intersectiondevice.h"
-#include "luxrays/core/virtualdevice.h"
 #include "luxrays/utils/utils.h"
 #include "slg/slg.h"
 #include "slg/engines/tilerepository.h"
@@ -164,6 +163,13 @@ void luxcore::ParseLXS(const string &fileName, Properties &renderConfigProps, Pr
 
 	if ((luxcore_parserlxs_yyin == NULL) || !parseSuccess)
 		throw runtime_error("Parsing failed: " + fileName);
+
+	// For some debugging
+	/*cout << "================ ParseLXS RenderConfig Properties ================\n";
+	cout << renderConfigProps;
+	cout << "================ ParseLXS RenderConfig Properties ================\n";
+	cout << sceneProps;
+	cout << "==================================================================\n";*/
 }
 
 //------------------------------------------------------------------------------
@@ -176,13 +182,24 @@ Properties luxcore::GetPlatformDesc() {
 	static const string luxCoreVersion(LUXCORE_VERSION_MAJOR "." LUXCORE_VERSION_MINOR);
 	props << Property("version.number")(luxCoreVersion);
 
-#if defined(LUXRAYS_DISABLE_OPENCL)
-	props << Property("compile.LUXRAYS_DISABLE_OPENCL")(true);
+#if !defined(LUXRAYS_DISABLE_OPENCL)
+	props << Property("compile.LUXRAYS_DISABLE_OPENCL")(!luxrays::isOpenCLAvilable);
+	props << Property("compile.LUXRAYS_ENABLE_OPENCL")(luxrays::isOpenCLAvilable);
 #else
-	props << Property("compile.LUXRAYS_DISABLE_OPENCL")(false);
+	props << Property("compile.LUXRAYS_DISABLE_OPENCL")(true);
+	props << Property("compile.LUXRAYS_ENABLE_OPENCL")(false);
+#endif
+
+#if !defined(LUXRAYS_DISABLE_CUDA)
+	props << Property("compile.LUXRAYS_DISABLE_CUDA")(!luxrays::isCudaAvilable);
+	props << Property("compile.LUXRAYS_ENABLE_CUDA")(luxrays::isCudaAvilable);
+#else
+	props << Property("compile.LUXRAYS_DISABLE_CUDA")(true);
+	props << Property("compile.LUXRAYS_ENABLE_CUDA")(false);
 #endif
 
 	props << Property("compile.LUXCORE_DISABLE_EMBREE_BVH_BUILDER")(false);
+	props << Property("compile.LC_MESH_MAX_DATA_COUNT")(LC_MESH_MAX_DATA_COUNT);
 
 	return props;
 }
@@ -201,20 +218,42 @@ Properties luxcore::GetOpenCLDeviceDescs() {
 	vector<DeviceDescription *> deviceDescriptions = ctx.GetAvailableDeviceDescriptions();
 
 	// Select only OpenCL devices
-	DeviceDescription::Filter(DEVICE_TYPE_OPENCL_ALL, deviceDescriptions);
+	DeviceDescription::Filter((DeviceType)(DEVICE_TYPE_OPENCL_ALL | DEVICE_TYPE_CUDA_ALL), deviceDescriptions);
 
 	// Add all device information to the list
 	for (size_t i = 0; i < deviceDescriptions.size(); ++i) {
 		DeviceDescription *desc = deviceDescriptions[i];
 
+		string platformName = "UNKNOWN";
+		string platformVersion = "UNKNOWN";
+		int deviceClock = 0;
+		unsigned long long deviceLocalMem = 0;
+		unsigned long long deviceConstMem = 0;
+		if (desc->GetType() & DEVICE_TYPE_OPENCL_ALL) {
+			OpenCLDeviceDescription *oclDesc = (OpenCLDeviceDescription *)deviceDescriptions[i];
+
+			platformName = oclDesc->GetOpenCLPlatform();
+			platformVersion = oclDesc->GetOpenCLVersion();
+			deviceClock = oclDesc->GetClock();
+			deviceLocalMem = oclDesc->GetLocalMem();
+			deviceConstMem = oclDesc->GetConstMem();
+		} else if (desc->GetType() & DEVICE_TYPE_CUDA_ALL) {
+			platformName = "NVIDIA";
+		}
+
 		const string prefix = "opencl.device." + ToString(i);
 		props <<
+				Property(prefix + ".platform.name")(platformName) <<
+				Property(prefix + ".platform.version")(platformVersion) <<
 				Property(prefix + ".name")(desc->GetName()) <<
 				Property(prefix + ".type")(DeviceDescription::GetDeviceType(desc->GetType())) <<
 				Property(prefix + ".units")(desc->GetComputeUnits()) <<
+				Property(prefix + ".clock")(deviceClock) <<
 				Property(prefix + ".nativevectorwidthfloat")(desc->GetNativeVectorWidthFloat()) <<
 				Property(prefix + ".maxmemory")((unsigned long long)desc->GetMaxMemory()) <<
-				Property(prefix + ".maxmemoryallocsize")((unsigned long long)desc->GetMaxMemoryAllocSize());
+				Property(prefix + ".maxmemoryallocsize")((unsigned long long)desc->GetMaxMemoryAllocSize()) <<
+				Property(prefix + ".localmemory")((unsigned long long)deviceLocalMem) <<
+				Property(prefix + ".constmemory")((unsigned long long)deviceConstMem);
 	}
 
 	return props;
@@ -262,6 +301,16 @@ template<> void Film::GetOutput<float>(const FilmOutputType type, float *buffer,
 template<> void Film::GetOutput<unsigned int>(const FilmOutputType type, unsigned int *buffer,
 		const unsigned int index, const bool executeImagePipeline) {
 	GetOutputUInt(type, buffer, index, executeImagePipeline);
+}
+
+template<> void Film::UpdateOutput<float>(const FilmOutputType type, const float *buffer,
+		const unsigned int index, const bool executeImagePipeline) {
+	UpdateOutputFloat(type, buffer, index, executeImagePipeline);
+}
+
+template<> void Film::UpdateOutput<unsigned int>(const FilmOutputType type, const unsigned int *buffer,
+		const unsigned int index, const bool executeImagePipeline) {
+	UpdateOutputUInt(type, buffer, index, executeImagePipeline);
 }
 
 template<> const float *Film::GetChannel<float>(const FilmChannelType type,

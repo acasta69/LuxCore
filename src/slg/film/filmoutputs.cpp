@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -271,6 +271,14 @@ Properties FilmOutputs::ToProperties(const Properties &cfg) {
 				props << type << fileName;
 				break;
 			}
+			case NOISE: {
+				props << type << fileName;
+				break;
+			}
+			case USER_IMPORTANCE: {
+				props << type << fileName;
+				break;
+			}
 			default:
 				throw runtime_error("Unknown film output type: " + type.Get<string>());
 		}
@@ -346,6 +354,10 @@ FilmOutputs::FilmOutputType FilmOutputs::String2FilmOutputType(const string &typ
 		return ALBEDO;
 	else if (type == "AVG_SHADING_NORMAL")
 		return AVG_SHADING_NORMAL;
+	else if (type == "NOISE")
+		return NOISE;
+	else if (type == "USER_IMPORTANCE")
+		return USER_IMPORTANCE;
 	else
 		throw runtime_error("Unknown film output type: " + type);
 }
@@ -418,6 +430,10 @@ const string FilmOutputs::FilmOutputType2String(const FilmOutputs::FilmOutputTyp
 			return "ALBEDO";
 		case AVG_SHADING_NORMAL:
 			return "AVG_SHADING_NORMAL";
+		case NOISE:
+			return "NOISE";
+		case USER_IMPORTANCE:
+			return "USER_IMPORTANCE";
 		default:
 			throw runtime_error("Unknown film output type: " + ToString(type));
 	}

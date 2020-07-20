@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -47,6 +47,7 @@ public:
 		RADIANCE_GROUP, UV, RAYCOUNT, BY_MATERIAL_ID, IRRADIANCE,
 		OBJECT_ID, OBJECT_ID_MASK, BY_OBJECT_ID, SAMPLECOUNT,
 		CONVERGENCE, SERIALIZED_FILM, MATERIAL_ID_COLOR, ALBEDO, AVG_SHADING_NORMAL,
+		NOISE, USER_IMPORTANCE,
 		FILMOUTPUT_TYPE_COUNT
 	} FilmOutputType;
 

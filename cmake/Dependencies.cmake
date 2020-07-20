@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright 1998-2018 by authors (see AUTHORS.txt)
+# Copyright 1998-2020 by authors (see AUTHORS.txt)
 #
 #   This file is part of LuxCoreRender.
 #
@@ -43,13 +43,16 @@ if(NOT APPLE)
     find_package(PNG REQUIRED)
     include_directories(BEFORE SYSTEM ${PNG_PNG_INCLUDE_DIR})
 	# Find Python Libraries
-	find_package(PythonLibs 3.4)
+    if("${PYTHON_V}" EQUAL "27")
+        find_package(PythonLibs 2.7)
+    else()
+        find_package(PythonLibs 3.4)
+    endif()
 endif()
 
 find_program(PYSIDE_UIC NAMES pyside-uic pyside2-uic
 		HINTS "${PYTHON_INCLUDE_DIRS}/../Scripts"
 		PATHS "c:/Program Files/Python${PYTHON_V}/Scripts")
-
 
 include_directories(${PYTHON_INCLUDE_DIRS})
 
@@ -93,14 +96,6 @@ find_package(OpenGL)
 
 if (OPENGL_FOUND)
 	include_directories(BEFORE SYSTEM ${OPENGL_INCLUDE_PATH})
-endif()
-
-# OpenCL
-set(OPENCL_ROOT                "${OPENCL_SEARCH_PATH}")
-find_package(OpenCL)
-
-if (OPENCL_FOUND)
-	include_directories(BEFORE SYSTEM ${OPENCL_INCLUDE_DIR} ${OPENCL_C_INCLUDE_DIR})
 endif ()
 
 # Intel Embree
@@ -116,7 +111,7 @@ set(OIDN_ROOT                "${OIDN_SEARCH_PATH}")
 find_package(Oidn REQUIRED)
 
 if (OIDN_FOUND)
-	include_directories(BEFORE SYSTEM ${ODIN_INCLUDE_PATH})
+	include_directories(BEFORE SYSTEM ${OIDN_INCLUDE_PATH})
 endif ()
 
 # Intel TBB

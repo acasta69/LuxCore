@@ -17,6 +17,9 @@
  ***************************************************************************/
 
 #include <iostream>
+#include <vector>
+#include <string>
+#include <cstring>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/thread.hpp>
 
@@ -31,23 +34,31 @@ using namespace luxcore;
 //------------------------------------------------------------------------------
 
 RenderEngineWindow::RenderEngineWindow(LuxCoreApp *a) : ObjectEditorWindow(a, "Render Engine") {
-	typeTable
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-		.Add("PATHOCL", 0)
-#endif
-		.Add("LIGHTCPU", 1)
-		.Add("PATHCPU", 2)
-		.Add("BIDIRCPU", 3)
-		.Add("BIDIRVMCPU", 4)
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-		.Add("RTPATHOCL", 5)
-#endif
-		.Add("TILEPATHCPU", 6)
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-		.Add("TILEPATHOCL", 7)
-#endif
-		.Add("RTPATHCPU", 8)
-		.SetDefault("PATHCPU");
+	vector<string> typeList;
+
+	if (app->isGPURenderingAvailable())
+		typeList.push_back("PATHOCL");
+
+	typeList.push_back("LIGHTCPU");
+	typeList.push_back("PATHCPU");
+	typeList.push_back("BIDIRCPU");
+	typeList.push_back("BIDIRVMCPU");
+
+	if (app->isGPURenderingAvailable())
+		typeList.push_back("RTPATHOCL");
+
+	typeList.push_back("TILEPATHCPU");
+
+	if (app->isGPURenderingAvailable())
+		typeList.push_back("TILEPATHOCL");
+
+	typeList.push_back("RTPATHCPU");
+	typeList.push_back("BAKECPU");
+
+	for (u_int i = 0; i < typeList.size(); ++i)
+		typeTable.Add(typeList[i], i);
+
+	typeTable.SetDefault("PATHCPU");
 }
 
 void RenderEngineWindow::Open() {
@@ -66,19 +77,15 @@ Properties RenderEngineWindow::GetAllRenderEngineProperties(const Properties &cf
 			cfgProps.GetAllProperties("tilepath") << 
 			cfgProps.GetAllProperties("tile") <<
 			cfgProps.GetAllProperties("native.threads.count") <<
-#if !defined(LUXRAYS_DISABLE_OPENCL)
 			cfgProps.GetAllProperties("opencl.task.count") <<
 			cfgProps.GetAllProperties("opencl.native.threads.count") <<
-#endif
 			cfgProps.GetAllProperties("batch");
 
 	if (props.IsDefined("renderengine.type")) {
 		const string renderEngineType = props.Get("renderengine.type").Get<string>();
 		if ((renderEngineType == "TILEPATHCPU")
-#if !defined(LUXRAYS_DISABLE_OPENCL)
 				|| (renderEngineType == "TILEPATHOCL")
 				|| (renderEngineType == "RTPATHOCL")
-#endif
 				)
 			props << Property("sampler.type")("TILEPATHSAMPLER");
 		else if (renderEngineType == "RTPATHCPU")
@@ -286,7 +293,6 @@ void RenderEngineWindow::TilePathGUI(Properties &props, bool &modifiedProps) {
 	}
 }
 
-#if !defined(LUXRAYS_DISABLE_OPENCL)
 void RenderEngineWindow::PathOCLGUI(Properties &props, bool &modifiedProps) {
 	PathGUI(props, modifiedProps);
 
@@ -351,7 +357,6 @@ void RenderEngineWindow::TilePathOCLGUI(Properties &props, bool &modifiedProps) 
 		LuxCoreApp::HelpMarker("opencl.native.threads.count");
 	}
 }
-#endif
 
 void RenderEngineWindow::BiDirGUI(Properties &props, bool &modifiedProps) {
 	float fval;
@@ -415,16 +420,13 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 		const string newRenderEngineType = typeTable.GetTag(typeIndex);
 
 		if ((newRenderEngineType == "TILEPATHCPU")
-#if !defined(LUXRAYS_DISABLE_OPENCL)
 				|| (newRenderEngineType == "TILEPATHOCL")
 				|| (newRenderEngineType == "RTPATHOCL")
-#endif
 				)
 			app->samplerWindow.Close();
-#if !defined(LUXRAYS_DISABLE_OPENCL)
+
 		if (!boost::ends_with(newRenderEngineType, "OCL"))
 			app->oclDeviceWindow.Close();
-#endif
 
 		props.Clear();
 		props << Property("renderengine.type")(newRenderEngineType);
@@ -440,8 +442,7 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 	// RTPATHOCL
 	//--------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-	if (typeIndex == typeTable.GetVal("RTPATHOCL")) {
+	if (currentRenderEngineType == "RTPATHOCL") {
 		TilePathOCLGUI(props, modifiedProps);
 
 		if (ImGui::CollapsingHeader("Sampling", NULL, true, true)) {
@@ -488,14 +489,12 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 		if (ImGui::Button("Open OpenCL device editor"))
 			app->oclDeviceWindow.Open();
 	}
-#endif
 
 	//--------------------------------------------------------------------------
 	// TILEPATHOCL
 	//--------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-	if (typeIndex == typeTable.GetVal("TILEPATHOCL")) {
+	if (currentRenderEngineType == "TILEPATHOCL") {
 		TilePathOCLGUI(props, modifiedProps);
 
 		if (ImGui::Button("Open Pixel Filter editor"))
@@ -504,13 +503,12 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 		if (ImGui::Button("Open OpenCL device editor"))
 			app->oclDeviceWindow.Open();
 	}
-#endif
 
 	//--------------------------------------------------------------------------
 	// TILEPATHCPU
 	//--------------------------------------------------------------------------
 
-	if (typeIndex == typeTable.GetVal("TILEPATHCPU")) {
+	if (currentRenderEngineType == "TILEPATHCPU") {
 		TilePathGUI(props, modifiedProps);
 		ThreadsGUI(props, modifiedProps);
 
@@ -522,8 +520,7 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 	// PATHOCL
 	//--------------------------------------------------------------------------
 
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-	if (typeIndex == typeTable.GetVal("PATHOCL")) {
+	if (currentRenderEngineType == "PATHOCL") {
 		PathOCLGUI(props, modifiedProps);
 
 		if (ImGui::Button("Open Sampler editor"))
@@ -535,13 +532,12 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 		if (ImGui::Button("Open OpenCL device editor"))
 			app->oclDeviceWindow.Open();
 	}
-#endif
 
 	//--------------------------------------------------------------------------
 	// PATHCPU
 	//--------------------------------------------------------------------------
 
-	if (typeIndex == typeTable.GetVal("PATHCPU")) {
+	if (currentRenderEngineType == "PATHCPU") {
 		PathGUI(props, modifiedProps);
 
 		ThreadsGUI(props, modifiedProps);
@@ -557,7 +553,7 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 	// RTPATHCPU
 	//--------------------------------------------------------------------------
 
-	if (typeIndex == typeTable.GetVal("RTPATHCPU")) {
+	if (currentRenderEngineType == "RTPATHCPU") {
 		PathGUI(props, modifiedProps);
 		ThreadsGUI(props, modifiedProps);
 
@@ -582,7 +578,7 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 	// BIDIRCPU
 	//--------------------------------------------------------------------------
 
-	if (typeIndex == typeTable.GetVal("BIDIRCPU")) {
+	if (currentRenderEngineType == "BIDIRCPU") {
 		BiDirGUI(props, modifiedProps);
 
 		if (ImGui::Button("Open Sampler editor"))
@@ -596,7 +592,7 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 	// BIDIRVMCPU
 	//--------------------------------------------------------------------------
 
-	if (typeIndex == typeTable.GetVal("BIDIRVMCPU")) {
+	if (currentRenderEngineType == "BIDIRVMCPU") {
 		BiDirGUI(props, modifiedProps);
 
 		if (ImGui::CollapsingHeader("BiDirVM Options", NULL, true, true)) {
@@ -638,34 +634,50 @@ bool RenderEngineWindow::DrawObjectGUI(Properties &props, bool &modifiedProps) {
 	// LIGHTCPU
 	//--------------------------------------------------------------------------
 
-	if (typeIndex == typeTable.GetVal("LIGHTCPU")) {
+	if (currentRenderEngineType == "LIGHTCPU") {
 		float fval;
 		int ival;
 
 		if (ImGui::CollapsingHeader("Path Depth", NULL, true, true)) {
-			ival = props.Get("light.maxdepth").Get<int>();
+			ival = props.Get("path.pathdepth.total").Get<int>();
 			if (ImGui::InputInt("Maximum light path recursion depth", &ival)) {
-				props.Set(Property("light.maxdepth")(ival));
+				props.Set(Property("path.pathdepth.total")(ival));
 				modifiedProps = true;
 			}
-			LuxCoreApp::HelpMarker("light.maxdepth");
+			LuxCoreApp::HelpMarker("path.pathdepth.total");
 		}
 
 		if (ImGui::CollapsingHeader("Russian Roulette", NULL, true, true)) {
-			ival = props.Get("light.russianroulette.depth").Get<int>();
+			ival = props.Get("path.russianroulette.depth").Get<int>();
 			if (ImGui::InputInt("Russian Roulette start depth", &ival)) {
-				props.Set(Property("light.russianroulette.depth")(ival));
+				props.Set(Property("path.russianroulette.depth")(ival));
 				modifiedProps = true;
 			}
-			LuxCoreApp::HelpMarker("light.russianroulette.depth");
+			LuxCoreApp::HelpMarker("path.russianroulette.depth");
 
-			fval = props.Get("light.russianroulette.cap").Get<float>();
+			fval = props.Get("path.russianroulette.cap").Get<float>();
 			if (ImGui::SliderFloat("Russian Roulette threshold", &fval, 0.f, 1.f)) {
-				props.Set(Property("light.russianroulette.cap")(fval));
+				props.Set(Property("path.russianroulette.cap")(fval));
 				modifiedProps = true;
 			}
-			LuxCoreApp::HelpMarker("light.russianroulette.cap");
+			LuxCoreApp::HelpMarker("path.russianroulette.cap");
 		}
+
+		ThreadsGUI(props, modifiedProps);
+
+		if (ImGui::Button("Open Sampler editor"))
+			app->samplerWindow.Open();
+		ImGui::SameLine();
+		if (ImGui::Button("Open Pixel Filter editor"))
+			app->pixelFilterWindow.Open();
+	}
+
+	//--------------------------------------------------------------------------
+	// BAKECPU
+	//--------------------------------------------------------------------------
+
+	if (currentRenderEngineType == "BAKECPU") {
+		PathGUI(props, modifiedProps);
 
 		ThreadsGUI(props, modifiedProps);
 

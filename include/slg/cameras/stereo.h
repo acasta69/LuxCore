@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -30,22 +30,25 @@ public:
 			const luxrays::Vector &up);
 	virtual ~StereoCamera();
 
-	luxrays::Matrix4x4 GetRasterToCameraMatrix(const u_int index = 0) const;
-	luxrays::Matrix4x4 GetCameraToWorldMatrix(const u_int index = 0) const;
+	const luxrays::Transform &GetRasterToCamera(const u_int index = 0) const;
+	const luxrays::Transform &GetCameraToWorld(const u_int index = 0) const;
+	const luxrays::Transform &GetScreenToWorld(const u_int index = 0) const;
 
 	// Preprocess/update methods
 	virtual void Update(const u_int filmWidth, const u_int filmHeight,
 		const u_int *filmSubRegion);
 
 	// Rendering methods
-	virtual void GenerateRay(
+	virtual void GenerateRay(const float time,
 		const float filmX, const float filmY,
 		luxrays::Ray *ray, PathVolumeInfo *volInfo,
-		const float u1, const float u2, const float u3) const;
+		const float u1, const float u2) const;
 	virtual bool GetSamplePosition(luxrays::Ray *eyeRay, float *filmX, float *filmY) const;
 	virtual bool SampleLens(const float time, const float u1, const float u2,
 		luxrays::Point *lensPoint) const;
-	virtual float GetPDF(const luxrays::Vector &eyeDir, const float filmX, const float filmY) const;
+	virtual void GetPDF(const luxrays::Ray &eyeRay, const float eyeDistance,
+		const float filmX, const float filmY,
+		float *pdfW, float *fluxToRadianceFactor) const;
 
 	virtual luxrays::Properties ToProperties() const;
 

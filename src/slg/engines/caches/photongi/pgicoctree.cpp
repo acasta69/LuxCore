@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -27,25 +27,27 @@ using namespace slg;
 // PGCIOctree
 //------------------------------------------------------------------------------
 
-PGCIOctree::PGCIOctree(const vector<VisibilityParticle> &entries,
+PGICOctree::PGICOctree(const vector<PGICVisibilityParticle> &entries,
 		const BBox &bbox, const float r, const float normAngle, const u_int md) :
 	IndexOctree(entries, bbox, r, normAngle, md) {
 }
 
-PGCIOctree::~PGCIOctree() {
+PGICOctree::~PGICOctree() {
 }
 
-u_int PGCIOctree::GetNearestEntry(const Point &p, const Normal &n) const {
+u_int PGICOctree::GetNearestEntry(const Point &p, const Normal &n,
+		const bool isVolume) const {
 	u_int nearestEntryIndex = NULL_INDEX;
 	float nearestDistance2 = entryRadius2;
 
-	GetNearestEntryImpl(&root, worldBBox, p, n, nearestEntryIndex, nearestDistance2);
+	GetNearestEntryImpl(&root, worldBBox, p, n, isVolume,
+			nearestEntryIndex, nearestDistance2);
 	
 	return nearestEntryIndex;
 }
 
-void PGCIOctree::GetNearestEntryImpl(const IndexOctreeNode *node, const BBox &nodeBBox,
-		const Point &p, const Normal &n,
+void PGICOctree::GetNearestEntryImpl(const IndexOctreeNode *node, const BBox &nodeBBox,
+		const Point &p, const Normal &n, const bool isVolume,
 		u_int &nearestEntryIndex, float &nearestDistance2) const {
 	// Check if I'm inside the node bounding box
 	if (!nodeBBox.Inside(p))
@@ -53,11 +55,11 @@ void PGCIOctree::GetNearestEntryImpl(const IndexOctreeNode *node, const BBox &no
 
 	// Check every entry in this node
 	for (auto const &entryIndex : node->entriesIndex) {
-		const VisibilityParticle &entry = allEntries[entryIndex];
+		const PGICVisibilityParticle &entry = allEntries[entryIndex];
 
 		const float distance2 = DistanceSquared(p, entry.p);
-		if ((distance2 < nearestDistance2) &&
-				(Dot(n, entry.n) >= entryNormalCosAngle)) {
+		if ((distance2 < nearestDistance2) && (entry.isVolume == isVolume) &&
+				(isVolume || (Dot(n, entry.n) >= entryNormalCosAngle))) {
 			// I have found a valid nearer entry
 			nearestEntryIndex = entryIndex;
 			nearestDistance2 = distance2;
@@ -71,30 +73,30 @@ void PGCIOctree::GetNearestEntryImpl(const IndexOctreeNode *node, const BBox &no
 			const BBox childBBox = ChildNodeBBox(child, nodeBBox, pMid);
 
 			GetNearestEntryImpl(node->children[child], childBBox,
-					p, n, nearestEntryIndex, nearestDistance2);
+					p, n, isVolume, nearestEntryIndex, nearestDistance2);
 		}
 	}
 }
 
-void PGCIOctree::GetAllNearEntries(vector<u_int> &allNearEntryIndices,
-		const Point &p, const Normal &n) const {
-	GetAllNearEntriesImpl(allNearEntryIndices, &root, worldBBox, p, n);
+void PGICOctree::GetAllNearEntries(vector<u_int> &allNearEntryIndices,
+		const Point &p, const Normal &n, const bool isVolume) const {
+	GetAllNearEntriesImpl(allNearEntryIndices, &root, worldBBox, p, n, isVolume);
 }
 
-void PGCIOctree::GetAllNearEntriesImpl(vector<u_int> &allNearEntryIndices,
+void PGICOctree::GetAllNearEntriesImpl(vector<u_int> &allNearEntryIndices,
 		const IndexOctreeNode *node, const BBox &nodeBBox,
-		const Point &p, const Normal &n) const {
+		const Point &p, const Normal &n, const bool isVolume) const {
 	// Check if I'm inside the node bounding box
 	if (!nodeBBox.Inside(p))
 		return;
 
 	// Check every entry in this node
 	for (auto const &entryIndex : node->entriesIndex) {
-		const VisibilityParticle &entry = allEntries[entryIndex];
+		const PGICVisibilityParticle &entry = allEntries[entryIndex];
 
 		const float distance2 = DistanceSquared(p, entry.p);
-		if ((distance2 < entryRadius2) &&
-				(Dot(n, entry.n) >= entryNormalCosAngle)) {
+		if ((distance2 < entryRadius2) && (entry.isVolume == isVolume) &&
+				(isVolume || (Dot(n, entry.n) >= entryNormalCosAngle))) {
 			// I have found a valid near entry
 			allNearEntryIndices.push_back(entryIndex);
 		}
@@ -107,7 +109,7 @@ void PGCIOctree::GetAllNearEntriesImpl(vector<u_int> &allNearEntryIndices,
 			const BBox childBBox = ChildNodeBBox(child, nodeBBox, pMid);
 
 			GetAllNearEntriesImpl(allNearEntryIndices,
-					node->children[child], childBBox, p, n);
+					node->children[child], childBBox, p, n, isVolume);
 		}
 	}
 }

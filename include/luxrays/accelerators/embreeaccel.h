@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -35,10 +35,11 @@ public:
 
 	virtual AcceleratorType GetType() const { return ACCEL_EMBREE; }
 
-	virtual OpenCLKernels *NewOpenCLKernels(OpenCLIntersectionDevice *device,
-		const u_int kernelCount) const { return NULL; }
-	virtual bool CanRunOnOpenCLDevice(OpenCLIntersectionDevice *device) const {
+	virtual bool HasDataParallelSupport(const IntersectionDevice &device) const {
 		return false;
+	}
+	virtual HardwareIntersectionKernel *NewHardwareIntersectionKernel(HardwareIntersectionDevice &device) const {
+		return nullptr;
 	}
 
 	virtual void Init(const std::deque<const Mesh *> &meshes,

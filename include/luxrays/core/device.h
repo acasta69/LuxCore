@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -21,6 +21,7 @@
 
 #include <string>
 #include <cstdlib>
+#include <limits>
 
 #include <boost/thread/thread.hpp>
 
@@ -31,92 +32,109 @@
 
 namespace luxrays {
 
+//------------------------------------------------------------------------------
+// DeviceDescription
+//------------------------------------------------------------------------------
+
 typedef enum {
-	DEVICE_TYPE_NATIVE_THREAD = 1 << 0,
+	DEVICE_TYPE_NATIVE = 1 << 0,
 	DEVICE_TYPE_OPENCL_DEFAULT = 1 << 1,
 	DEVICE_TYPE_OPENCL_CPU = 1 << 2,
 	DEVICE_TYPE_OPENCL_GPU = 1 << 3,
 	DEVICE_TYPE_OPENCL_UNKNOWN = 1 << 4,
-	DEVICE_TYPE_VIRTUAL = 1 << 5,
+	DEVICE_TYPE_CUDA_GPU = 1 << 5,
 	DEVICE_TYPE_OPENCL_ALL = DEVICE_TYPE_OPENCL_DEFAULT |
 		DEVICE_TYPE_OPENCL_CPU | DEVICE_TYPE_OPENCL_GPU |
 		DEVICE_TYPE_OPENCL_UNKNOWN,
-	DEVICE_TYPE_ALL = DEVICE_TYPE_NATIVE_THREAD | DEVICE_TYPE_OPENCL_ALL |
-		DEVICE_TYPE_VIRTUAL
+	DEVICE_TYPE_CUDA_ALL = DEVICE_TYPE_CUDA_GPU,
+	DEVICE_TYPE_ALL = DEVICE_TYPE_NATIVE | DEVICE_TYPE_OPENCL_ALL,
+	DEVICE_TYPE_ALL_HARDWARE = DEVICE_TYPE_OPENCL_ALL | DEVICE_TYPE_CUDA_ALL,
+	DEVICE_TYPE_ALL_INTERSECTION = DEVICE_TYPE_NATIVE | DEVICE_TYPE_OPENCL_ALL,
 } DeviceType;
 
 class DeviceDescription {
 public:
-	DeviceDescription(const std::string deviceName,
+	DeviceDescription(const std::string &deviceName,
 		const DeviceType deviceType) :
-		name(deviceName), type(deviceType) { }
+		name(deviceName), type(deviceType),
+		forceWorkGroupSize(0) { }
 	virtual ~DeviceDescription() { }
 
 	const std::string &GetName() const { return name; }
 	const DeviceType GetType() const { return type; };
 	virtual int GetComputeUnits() const { return 1; }
 	virtual u_int GetNativeVectorWidthFloat() const { return 4; };
-	virtual size_t GetMaxMemory() const { return 0; }
-	virtual size_t GetMaxMemoryAllocSize() const { return 0; }
+	virtual size_t GetMaxMemory() const { return std::numeric_limits<size_t>::max(); }
+	virtual size_t GetMaxMemoryAllocSize() const { return std::numeric_limits<size_t>::max(); }
+	virtual bool HasOutOfCoreMemorySupport() const { return false; }
+
+	virtual u_int GetForceWorkGroupSize() const { return forceWorkGroupSize; }
+	virtual void SetForceWorkGroupSize(const u_int size) { forceWorkGroupSize = size; }
 
 	static void FilterOne(std::vector<DeviceDescription *> &deviceDescriptions);
-	static void Filter(DeviceType type, std::vector<DeviceDescription *> &deviceDescriptions);
+	static void Filter(const DeviceType type, std::vector<DeviceDescription *> &deviceDescriptions);
 	static std::string GetDeviceType(const DeviceType type);
 
 protected:
 	std::string name;
 	DeviceType type;
+
+	u_int forceWorkGroupSize;
 };
+
+//------------------------------------------------------------------------------
+// Device
+//------------------------------------------------------------------------------
+
+/*
+ * The inheritance scheme used here:
+ *
+ *  Device => | =>                  IntersectionDevice                   => | => NativeIntersectionDevice
+ *  
+ *            | =>   HardwareDevice   => | =>        OpenCLDevice        => |
+ *  Device => |                                                             | => OpenCLIntersectionDevice
+ *            | =>   HardwareDevice   => |                                  |
+ *            |                          | => HardwareIntersectionDevice => |
+ *            | => IntersectionDevice => |
+ *
+ *            | =>   HardwareDevice   => | =>         CudaDevice         => |
+ *  Device => |					                                            | => CudaIntersectionDevice
+ *            | =>   HardwareDevice   => |                                  |
+ *            |                          | => HardwareIntersectionDevice => |
+ *            | => IntersectionDevice => |
+ */
 
 class Device {
 public:
 	const std::string &GetName() const { return deviceName; }
 	const Context *GetContext() const { return deviceContext; }
-	const DeviceType GetType() const { return deviceType; }
+	virtual const DeviceDescription *GetDeviceDesc() const = 0;
+	const size_t GetDeviceIndex() const { return deviceIndex; }
 
 	virtual bool IsRunning() const { return started; };
 
-	virtual size_t GetMaxMemory() const { return 0; }
-	size_t GetUsedMemory() const { return usedMemory; }
-	void AllocMemory(size_t s) const { usedMemory += s; }
-	void FreeMemory(size_t s) const { usedMemory -= s; }
+	// Set the thread current device
+	virtual void PushThreadCurrentDevice() { }
+	virtual void PopThreadCurrentDevice() { }
 
 	friend class Context;
-	friend class VirtualM2OHardwareIntersectionDevice;
-	friend class VirtualM2MHardwareIntersectionDevice;
+	friend class OpenCLIntersectionDevice;
 
 protected:
-	Device(const Context *context, const DeviceType type, const size_t index);
+	Device() { }
+	Device(const Context *context, const size_t index);
 	virtual ~Device();
 
 	virtual void Start();
-	virtual void Interrupt() = 0;
+	virtual void Interrupt();
 	virtual void Stop();
 
 	const Context *deviceContext;
-	DeviceType deviceType;
 	size_t deviceIndex;
 
 	std::string deviceName;
 
 	bool started;
-
-	mutable size_t usedMemory;
-};
-
-//------------------------------------------------------------------------------
-// Native thread devices
-//------------------------------------------------------------------------------
-
-class NativeThreadDeviceDescription : public DeviceDescription {
-public:
-	NativeThreadDeviceDescription(const std::string deviceName) :
-		DeviceDescription(deviceName, DEVICE_TYPE_NATIVE_THREAD) { }
-
-	friend class Context;
-
-protected:
-	static void AddDeviceDescs(std::vector<DeviceDescription *> &descriptions);
 };
 
 }

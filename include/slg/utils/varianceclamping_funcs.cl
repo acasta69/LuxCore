@@ -1,7 +1,7 @@
 #line 2 "varianceclamping_funcs.cl"
 
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -24,13 +24,14 @@ OPENCL_FORCE_INLINE float3 VarianceClamping_GetWeightedFloat4(__global float *sr
 	if (val.w > 0.f) {
 		const float k = 1.f / val.w;
 		
-		return ((float3)(val.x, val.y, val.z)) * k;
+		return (MAKE_FLOAT3(val.x, val.y, val.z)) * k;
 	} else
-		return 0.f;
+		return BLACK;
 }
 
-OPENCL_FORCE_INLINE void VarianceClamping_Clamp(__global SampleResult *sampleResult, const float sqrtVarianceClampMaxValue
-	FILM_PARAM_DECL) {
+OPENCL_FORCE_INLINE void VarianceClamping_Clamp(
+		__global SampleResult *sampleResult, const float sqrtVarianceClampMaxValue
+		FILM_PARAM_DECL) {
 	// Recover the current pixel value
 	const int x = sampleResult->pixelX;
 	const int y = sampleResult->pixelY;
@@ -38,37 +39,14 @@ OPENCL_FORCE_INLINE void VarianceClamping_Clamp(__global SampleResult *sampleRes
 	const uint index1 = x + y * filmWidth;
 	const uint index4 = index1 * 4;
 
-	float3 expectedValue = 0.f;
-
-#if defined(PARAM_FILM_RADIANCE_GROUP_0)
-	expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[0])[index4]));
-#endif
-#if defined(PARAM_FILM_RADIANCE_GROUP_1)
-	expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[1])[index4]));
-#endif
-#if defined(PARAM_FILM_RADIANCE_GROUP_2)
-	expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[2])[index4]));
-#endif
-#if defined(PARAM_FILM_RADIANCE_GROUP_3)
-	expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[3])[index4]));
-#endif
-#if defined(PARAM_FILM_RADIANCE_GROUP_4)
-	expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[4])[index4]));
-#endif
-#if defined(PARAM_FILM_RADIANCE_GROUP_5)
-	expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[5])[index4]));
-#endif
-#if defined(PARAM_FILM_RADIANCE_GROUP_6)
-	expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[6])[index4]));
-#endif
-#if defined(PARAM_FILM_RADIANCE_GROUP_7)
-	expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[7])[index4]));
-#endif
+	float3 expectedValue = BLACK;
+	for (uint i = 0; i < film->radianceGroupCount; ++i)
+		expectedValue += VarianceClamping_GetWeightedFloat4(&((filmRadianceGroup[i])[index4]));
 
 	// Use the current pixel value as expected value
 	const float minExpectedValue = fmin(expectedValue.x, fmin(expectedValue.y, expectedValue.z));
 	const float maxExpectedValue = fmax(expectedValue.x, fmax(expectedValue.y, expectedValue.z));
-	SampleResult_ClampRadiance(sampleResult,
+	SampleResult_ClampRadiance(film, sampleResult,
 			fmax(minExpectedValue - sqrtVarianceClampMaxValue, 0.f),
 			maxExpectedValue + sqrtVarianceClampMaxValue);
 }

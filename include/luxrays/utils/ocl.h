@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -16,25 +16,12 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
-// NOTE: this file is included in LuxCore so any external dependency must be
-// avoided here
-
 #ifndef _LUXRAYS_OPENCL_H
 #define	_LUXRAYS_OPENCL_H
 
-#include <string>
-
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
-// To avoid reference to OpenCL 1.2 symbols in cl.hpp file
-#define CL_USE_DEPRECATED_OPENCL_1_1_APIS
-#define __CL_ENABLE_EXCEPTIONS
-
-#if defined(__APPLE__)
-#include <OpenCL/cl.hpp>
-#else
-#include <CL/cl.hpp>
-#endif
+#include <clew.h>
 
 #endif
 

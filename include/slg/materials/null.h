@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -29,15 +29,15 @@ namespace slg {
 
 class NullMaterial : public Material {
 public:
-	NullMaterial(const Texture *transp) : Material(transp, NULL, NULL) { }
+	NullMaterial(const Texture *frontTransp, const Texture *backTransp);
 
 	virtual MaterialType GetType() const { return NULLMAT; }
 	virtual BSDFEvent GetEventTypes() const { return SPECULAR | TRANSMIT; };
 
 	virtual bool IsDelta() const { return true; }
-	virtual bool IsPassThrough() const { return true; }
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint &hitPoint,
-		const luxrays::Vector &localFixedDir, const float passThroughEvent) const;
+		const luxrays::Vector &localFixedDir, const float passThroughEvent,
+		const bool backTracing) const;
 
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
 
@@ -47,7 +47,7 @@ public:
 	virtual luxrays::Spectrum Sample(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const;
+		float *pdfW, BSDFEvent *event, const BSDFEvent eventHint = NONE) const;
 	virtual void Pdf(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const {
@@ -58,6 +58,9 @@ public:
 	}
 
 	virtual luxrays::Properties ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const;
+
+protected:
+	virtual void UpdateAvgPassThroughTransparency();
 };
 
 }

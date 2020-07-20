@@ -1,7 +1,7 @@
 #line 2 "sampler_types.cl"
 
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -27,20 +27,11 @@
 #define IDX_SCREEN_X 0
 #define IDX_SCREEN_Y 1
 #define IDX_EYE_TIME 2
-#if defined(PARAM_HAS_PASSTHROUGH)
-#define IDX_EYE_PASSTHROUGH 3
-#define IDX_DOF_X 4
-#define IDX_DOF_Y 5
-#define IDX_BSDF_OFFSET 6
-#else
 #define IDX_DOF_X 3
 #define IDX_DOF_Y 4
 #define IDX_BSDF_OFFSET 5
-#endif
 
 // Relative to IDX_BSDF_OFFSET + PathDepth * VERTEX_SAMPLE_SIZE
-#if defined(PARAM_HAS_PASSTHROUGH)
-
 #define IDX_PASSTHROUGH 0
 #define IDX_BSDF_X 1
 #define IDX_BSDF_Y 2
@@ -53,53 +44,17 @@
 
 #define VERTEX_SAMPLE_SIZE 9
 
-#else
-
-#define IDX_BSDF_X 0
-#define IDX_BSDF_Y 1
-#define IDX_DIRECTLIGHT_X 2
-#define IDX_DIRECTLIGHT_Y 3
-#define IDX_DIRECTLIGHT_Z 4
-#define IDX_DIRECTLIGHT_W 5
-#define IDX_RR 6
-
-#define VERTEX_SAMPLE_SIZE 7
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 0)
-#define TOTAL_U_SIZE 2
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 1)
-#define TOTAL_U_SIZE (IDX_BSDF_OFFSET + PARAM_MAX_PATH_DEPTH * VERTEX_SAMPLE_SIZE)
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 2)
-#define TOTAL_U_SIZE 2
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 3)
-#define TOTAL_U_SIZE 2
-#endif
-
 #endif
 
 //------------------------------------------------------------------------------
 // Sample data types
 //------------------------------------------------------------------------------
 
-// This is defined only under OpenCL because of variable size structures
-#if defined(SLG_OPENCL_KERNEL)
-
 typedef struct {
-	unsigned int pixelIndexBase, pixelIndexOffset, pixelIndexRandomStart;
-
-	SampleResult result;
+	unsigned int bucketIndex, pixelOffset, passOffset, pass;
 } RandomSample;
 
 typedef struct {
-	SampleResult result;
-
 	float totalI;
 
 	// Using ushort here totally freeze the ATI driver
@@ -107,17 +62,16 @@ typedef struct {
 	unsigned int current, proposed, consecutiveRejects;
 
 	float weight;
+
 	SampleResult currentResult;
 } MetropolisSample;
 
 typedef struct {
-	unsigned int pixelIndexBase, pixelIndexOffset, pass, pixelIndexRandomStart;
+	unsigned int bucketIndex, pixelOffset, passOffset, pass;
 
 	Seed rngGeneratorSeed;
 	unsigned int rngPass;
 	float rng0, rng1;
-
-	SampleResult result;
 } SobolSample;
 
 typedef struct {
@@ -125,77 +79,39 @@ typedef struct {
 	float rng0, rng1;
 
 	unsigned int pass;
-
-	SampleResult result;
 } TilePathSample;
-
-#if (PARAM_SAMPLER_TYPE == 0)
-typedef RandomSample Sample;
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 1)
-typedef MetropolisSample Sample;
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 2)
-typedef SobolSample Sample;
-#endif
-
-// This is a special Sampler used by TILEPATHOCL
-#if (PARAM_SAMPLER_TYPE == 3)
-typedef TilePathSample Sample;
-#endif
-
-#endif
 
 //------------------------------------------------------------------------------
 // Sampler shared data types
 //------------------------------------------------------------------------------
 
 typedef struct {
-	unsigned int pixelBucketIndex;
-	float adaptiveStrength;
+	unsigned int bucketIndex;
 } RandomSamplerSharedData;
 
 typedef struct {
 	unsigned int seedBase;
-	unsigned int pixelBucketIndex;
-	float adaptiveStrength;
-	// Plus the a pass field for each buckets
-	//
-	// NOTE: sizeof(SobolSamplerSharedData) is hard coded in sampler_sobol_funcs.cl
-	// any change in this struct must be sync'ed with the size used there
+	unsigned int bucketIndex;
+
+	// This is used to compute the size of appended data at the end
+	// of SobolSamplerSharedData
+	unsigned int filmRegionPixelCount;
+
+	// Plus the a pass field for each pixel
+	// Plus Sobol directions array
 } SobolSamplerSharedData;
 
-// An array of TilePathSamplerSharedData with one for each thread
 typedef struct {
-	unsigned int rngPass;
-	float rng0, rng1;
+	// cameraFilmWidth/cameraFilmHeight and filmWidth/filmHeight are usually
+	// the same. They are different when doing tile rendering
+	unsigned int cameraFilmWidth, cameraFilmHeight;
+	unsigned int tileStartX, tileStartY;
+	unsigned int tileWidth, tileHeight;
+	unsigned int tilePass, aaSamples;
+	unsigned int multipassIndexToRender;
+
+	// Plus Sobol directions array
 } TilePathSamplerSharedData;
-
-#if defined(SLG_OPENCL_KERNEL)
-
-typedef struct {
-	unsigned int dummy;
-} DummySamplerSharedData ;
-
-#if (PARAM_SAMPLER_TYPE == 0)
-typedef RandomSamplerSharedData SamplerSharedData;
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 1)
-typedef DummySamplerSharedData SamplerSharedData;
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 2)
-typedef SobolSamplerSharedData SamplerSharedData;
-#endif
-
-#if (PARAM_SAMPLER_TYPE == 3)
-typedef TilePathSamplerSharedData SamplerSharedData;
-#endif
-
-#endif
 
 //------------------------------------------------------------------------------
 // Sampler data types
@@ -212,10 +128,12 @@ typedef struct {
 	SamplerType type;
 	union {
 		struct {
-			float adaptiveStrength;
+			float adaptiveStrength, adaptiveUserImportanceWeight;
+			unsigned int bucketSize, tileSize, superSampling, overlapping;
 		} random;
 		struct {
-			float adaptiveStrength;
+			float adaptiveStrength, adaptiveUserImportanceWeight;
+			unsigned int bucketSize, tileSize, superSampling, overlapping;
 		} sobol;
 		struct {
 			float largeMutationProbability, imageMutationRange;
@@ -224,9 +142,19 @@ typedef struct {
 	};
 } Sampler;
 
-#define RANDOM_OCL_WORK_SIZE 16
-
-#define SOBOL_OCL_WORK_SIZE 16
 #define SOBOL_BITS 32
 #define SOBOL_MAX_DIMENSIONS 21201
-#define SOBOL_MAX_DEPTH 16
+#define SOBOL_STARTOFFSET 32
+
+#define SAMPLER_PARAM_DECL \
+		, Seed *seed \
+		, __global void *samplerSharedDataBuff \
+		, __global void *samplesBuff \
+		, __global float *samplesDataBuff \
+		, __global SampleResult *sampleResultsBuff
+#define SAMPLER_PARAM \
+		, seed \
+		, samplerSharedDataBuff \
+		, samplesBuff \
+		, samplesDataBuff \
+		, sampleResultsBuff

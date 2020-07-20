@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -31,11 +31,14 @@ Properties Film::ToProperties(const Properties &cfg) {
 			cfg.Get(Property("film.width")(640u)) <<
 			cfg.Get(Property("film.height")(480u)) <<
 			cfg.Get(Property("film.safesave")(true)) <<
-			cfg.Get(Property("batch.haltthreshold")(-1.f)) <<
-			cfg.Get(Property("batch.haltthreshold.step")(64)) <<
-			cfg.Get(Property("batch.haltthreshold.warmup")(64)) <<
-			cfg.Get(Property("batch.haltthreshold.filter.enable")(true)) <<
-			cfg.Get(Property("batch.haltthreshold.stoprendering.enable")(true)) <<
+			cfg.Get(Property("film.noiseestimation.step")(32)) <<
+			cfg.Get(Property("film.noiseestimation.warmup")(32)) <<
+			cfg.Get(Property("film.noiseestimation.filter.scale")(4)) <<
+			cfg.Get(Property("batch.haltnoisethreshold")(-1.f)) <<
+			cfg.Get(Property("batch.haltnoisethreshold.step")(64)) <<
+			cfg.Get(Property("batch.haltnoisethreshold.warmup")(64)) <<
+			cfg.Get(Property("batch.haltnoisethreshold.filter.enable")(true)) <<
+			cfg.Get(Property("batch.haltnoisethreshold.stoprendering.enable")(true)) <<
 			cfg.Get(Property("batch.halttime")(0.0)) <<
 			cfg.Get(Property("batch.haltspp")(0u)) <<
 			FilmOutputs::ToProperties(cfg);
@@ -109,7 +112,7 @@ Film *Film::FromProperties(const Properties &cfg) {
 	SLG_LOG("Film resolution: " << filmFullWidth << "x" << filmFullHeight);
 	if (filmSubRegionUsed)
 		SLG_LOG("Film sub-region: " << filmSubRegion[0] << " " << filmSubRegion[1] << filmSubRegion[2] << " " << filmSubRegion[3]);
-	auto_ptr<Film> film(new Film(filmFullWidth, filmFullHeight,
+	unique_ptr<Film> film(new Film(filmFullWidth, filmFullHeight,
 			filmSubRegionUsed ? filmSubRegion : NULL));
 
 	// For compatibility with the past
@@ -122,15 +125,19 @@ Film *Film::FromProperties(const Properties &cfg) {
 			film->RemoveChannel(Film::ALPHA);
 	}
 
-	film->oclEnable = cfg.Get(Property("film.opencl.enable")(true)).Get<bool>();
-	film->oclPlatformIndex = cfg.Get(Property("film.opencl.platform")(-1)).Get<int>();
-	film->oclDeviceIndex = cfg.Get(Property("film.opencl.device")(-1)).Get<int>();
+	film->hwEnable = cfg.Get(Property("film.hw.enable")(
+			cfg.Get(Property("film.opencl.enable")(true)).Get<bool>()
+			)).Get<bool>();
+	film->hwDeviceIndex = cfg.Get(Property("film.hw.device")(
+			// For compatibility with the past
+			cfg.Get(Property("film.opencl.device")(-1)).Get<int>()
+			)).Get<int>();
 
 	//--------------------------------------------------------------------------
 	// Add the default image pipeline
 	//--------------------------------------------------------------------------
 
-	auto_ptr<ImagePipeline> imagePipeline(new ImagePipeline());
+	unique_ptr<ImagePipeline> imagePipeline(new ImagePipeline());
 	imagePipeline->AddPlugin(new AutoLinearToneMap());
 	imagePipeline->AddPlugin(new GammaCorrectionPlugin(2.2f));
 

@@ -1,7 +1,7 @@
 #line 2 "sampler_sobol_funcs.cl"
 
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -22,230 +22,294 @@
 // Sobol Sequence
 //------------------------------------------------------------------------------
 
-#if (PARAM_SAMPLER_TYPE == 2) || ((PARAM_SAMPLER_TYPE == 3) && defined(RENDER_ENGINE_TILEPATHOCL))
-
-OPENCL_FORCE_INLINE uint SobolSequence_SobolDimension(const uint index, const uint dimension) {
+OPENCL_FORCE_INLINE uint SobolSequence_SobolDimension(
+		__global const uint* restrict sobolDirections,
+		const uint index, const uint dimension) {
 	const uint offset = dimension * SOBOL_BITS;
 	uint result = 0;
 	uint i = index;
 
 	for (uint j = 0; i; i >>= 1, j++) {
 		if (i & 1)
-			result ^= SOBOL_DIRECTIONS[offset + j];
+			result ^= sobolDirections[offset + j];
 	}
 
 	return result;
 }
 
-OPENCL_FORCE_INLINE float SobolSequence_GetSample(__global Sample *sample, const uint index) {
-	const uint pass = sample->pass;
-
+OPENCL_FORCE_INLINE float SobolSequence_GetSample(
+		__global const uint* restrict sobolDirections,
+		const uint pass, const uint rngPass, const float rng0, const float rng1,
+		const uint index) {
 	// I scramble pass too in order avoid correlations visible with LIGHTCPU and PATHCPU
-	const uint iResult = SobolSequence_SobolDimension(pass + sample->rngPass, index);
+	const uint iResult = SobolSequence_SobolDimension(sobolDirections, pass + rngPass, index);
 	const float fResult = iResult * (1.f / 0xffffffffu);
 
 	// Cranley-Patterson rotation to reduce visible regular patterns
-	const float shift = (index & 1) ? sample->rng0 : sample->rng1;
+	const float shift = (index & 1) ? rng0 : rng1;
 	const float val = fResult + shift;
 
 	return val - floor(val);
 }
 
-#endif
-
 //------------------------------------------------------------------------------
 // Sobol Sampler Kernel
 //------------------------------------------------------------------------------
 
-#if (PARAM_SAMPLER_TYPE == 2)
+#define SOBOLSAMPLER_TOTAL_U_SIZE 2
 
-OPENCL_FORCE_INLINE void SamplerSharedData_GetNewBucket(__global SamplerSharedData *samplerSharedData,
-		const uint filmRegionPixelCount,
-		uint *pixelBucketIndex, uint *pass, uint *seed) {
-	*pixelBucketIndex = atomic_inc(&samplerSharedData->pixelBucketIndex) %
-				((filmRegionPixelCount + SOBOL_OCL_WORK_SIZE - 1) / SOBOL_OCL_WORK_SIZE);
-
-	// The array of fields is attached to the SamplerSharedData structure
-	// and 3 * sizeof(u_int) = sizeof(SamplerSharedData)
-	__global uint *bucketPass = (__global uint *)(&samplerSharedData->pixelBucketIndex) + 3;
-	*pass = atomic_inc(&bucketPass[*pixelBucketIndex]);
-
-	*seed = (samplerSharedData->seedBase + *pixelBucketIndex) % (0xFFFFFFFFu - 1u) + 1u;
+OPENCL_FORCE_INLINE __global uint *SobolSampler_GetPassesPtr(__global SobolSamplerSharedData *samplerSharedData) {
+	// Sobol pass array is appended at the end of slg::ocl::SobolSamplerSharedData
+	return (__global uint *)(
+			(__global char *)samplerSharedData +
+			sizeof(SobolSamplerSharedData));
 }
 
-OPENCL_FORCE_NOT_INLINE void Sampler_InitNewSample(Seed *seed,
-		__global SamplerSharedData *samplerSharedData,
-		__global Sample *sample, __global float *sampleDataPathBase,
-#if defined(PARAM_FILM_CHANNELS_HAS_CONVERGENCE)
-		__global float *filmConvergence,
-#endif
+OPENCL_FORCE_INLINE __global const uint* restrict SobolSampler_GetSobolDirectionsPtr(__global SobolSamplerSharedData *samplerSharedData) {
+	// Sobol directions array is appended at the end of slg::ocl::SobolSamplerSharedData + all pass values
+	return (__global const uint* restrict)(
+			(__global char *)samplerSharedData +
+			sizeof(SobolSamplerSharedData) +
+			sizeof(uint) * samplerSharedData->filmRegionPixelCount);
+}
+
+OPENCL_FORCE_INLINE float SobolSampler_GetSample(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		const uint index
+		SAMPLER_PARAM_DECL) {
+	const size_t gid = get_global_id(0);
+
+	switch (index) {
+		case IDX_SCREEN_X: {
+			__global float *samplesData = &samplesDataBuff[gid * SOBOLSAMPLER_TOTAL_U_SIZE];
+			return samplesData[IDX_SCREEN_X];
+		}
+		case IDX_SCREEN_Y: {
+			__global float *samplesData = &samplesDataBuff[gid * SOBOLSAMPLER_TOTAL_U_SIZE];
+			return samplesData[IDX_SCREEN_Y];
+		}
+		default: {
+			__global SobolSamplerSharedData *samplerSharedData = (__global SobolSamplerSharedData *)samplerSharedDataBuff;
+			__global const uint* restrict sobolDirections = SobolSampler_GetSobolDirectionsPtr(samplerSharedData);
+
+			__global SobolSample *samples = (__global SobolSample *)samplesBuff;
+			__global SobolSample *sample = &samples[gid];
+
+			return SobolSequence_GetSample(sobolDirections, sample->pass, sample->rngPass, sample->rng0, sample->rng1, index);	
+		}
+	}
+}
+
+OPENCL_FORCE_INLINE void SobolSampler_SplatSample(
+		__constant const GPUTaskConfiguration* restrict taskConfig
+		SAMPLER_PARAM_DECL
+		FILM_PARAM_DECL
+		) {
+	const size_t gid = get_global_id(0);
+	__global SampleResult *sampleResult = &sampleResultsBuff[gid];
+
+	Film_AddSample(sampleResult->pixelX, sampleResult->pixelY,
+			sampleResult, 1.f
+			FILM_PARAM);
+}
+
+OPENCL_FORCE_INLINE void SobolSamplerSharedData_GetNewBucket(__global SobolSamplerSharedData *samplerSharedData,
+		const uint bucketCount, uint *newBucketIndex, uint *seed) {
+	*newBucketIndex = atomic_inc(&samplerSharedData->bucketIndex) % bucketCount;
+
+    *seed = (samplerSharedData->seedBase + *newBucketIndex) % (0xFFFFFFFFu - 1u) + 1u;
+}
+
+OPENCL_FORCE_INLINE void SobolSampler_InitNewSample(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global float *filmNoise,
+		__global float * filmUserImportance,
 		const uint filmWidth, const uint filmHeight,
 		const uint filmSubRegion0, const uint filmSubRegion1,
-		const uint filmSubRegion2, const uint filmSubRegion3) {
-	const uint filmRegionPixelCount = (filmSubRegion1 - filmSubRegion0 + 1) * (filmSubRegion3 - filmSubRegion2 + 1);
+		const uint filmSubRegion2, const uint filmSubRegion3
+		SAMPLER_PARAM_DECL) {
+	const size_t gid = get_global_id(0);
+	__constant const Sampler *sampler = &taskConfig->sampler;
+	__global SobolSamplerSharedData *samplerSharedData = (__global SobolSamplerSharedData *)samplerSharedDataBuff;
+	__global SobolSample *samples = (__global SobolSample *)samplesBuff;
+	__global SobolSample *sample = &samples[gid];
+	__global float *samplesData = &samplesDataBuff[gid * SOBOLSAMPLER_TOTAL_U_SIZE];
 
-#if defined(PARAM_FILM_CHANNELS_HAS_CONVERGENCE)
-	const float adaptiveStrength = samplerSharedData->adaptiveStrength;
-#endif
+	const uint bucketSize = sampler->sobol.bucketSize;
+	const uint tileSize = sampler->sobol.tileSize;
+	const uint superSampling = sampler->sobol.superSampling;
+	const uint overlapping = sampler->sobol.overlapping;
+	
+	const uint subRegionWidth = filmSubRegion1 - filmSubRegion0 + 1;
+	const uint subRegionHeight = filmSubRegion3 - filmSubRegion2 + 1;
 
-	// Update pixelIndexOffset
+	const uint tiletWidthCount = (subRegionWidth + tileSize - 1) / tileSize;
+	const uint tileHeightCount = (subRegionHeight + tileSize - 1) / tileSize;
 
-	uint pixelIndexBase  = sample->pixelIndexBase;
-	uint pixelIndexOffset = sample->pixelIndexOffset;
-	uint pass = sample->pass;
-	// pixelIndexRandomStart is used to jitter the order of the pixel rendering
-	uint pixelIndexRandomStart = sample->pixelIndexRandomStart;
+	const uint bucketCount = overlapping * (tiletWidthCount * tileSize * tileHeightCount * tileSize + bucketSize - 1) / bucketSize;
 
+	// Pick the pixel to render
+
+	uint bucketIndex = sample->bucketIndex;
+	uint pixelOffset = sample->pixelOffset;
+	uint passOffset = sample->passOffset;
+
+	Seed rngGeneratorSeed = sample->rngGeneratorSeed;
 	for (;;) {
-		pixelIndexOffset++;
-		if (pixelIndexOffset >= SOBOL_OCL_WORK_SIZE) {
-			// Ask for a new base
-			uint bucketSeed;
-			SamplerSharedData_GetNewBucket(samplerSharedData, filmRegionPixelCount,
-					&pixelIndexBase, &pass, &bucketSeed);
+		passOffset++;
+		if (passOffset >= superSampling) {
+			pixelOffset++;
+			passOffset = 0;
 
-			// Transform the bucket index in a pixel index
-			pixelIndexBase = pixelIndexBase * SOBOL_OCL_WORK_SIZE;
-			pixelIndexOffset = 0;
+			if (pixelOffset >= bucketSize) {
+				// Ask for a new bucket
+				uint bucketSeed;
+				SobolSamplerSharedData_GetNewBucket(samplerSharedData, bucketCount,
+						&bucketIndex, &bucketSeed);
 
-			sample->pixelIndexBase = pixelIndexBase;
-			sample->pass = pass;
+				sample->bucketIndex = bucketIndex;
+				pixelOffset = 0;
+				passOffset = 0;
 
-			pixelIndexRandomStart = Floor2UInt(Rnd_FloatValue(seed) * SOBOL_OCL_WORK_SIZE);
-			sample->pixelIndexRandomStart = pixelIndexRandomStart;
-
-			Seed rngGeneratorSeed;
-			Rnd_Init(bucketSeed, &rngGeneratorSeed);
-			sample->rngGeneratorSeed = rngGeneratorSeed;
+				Rnd_Init(bucketSeed, &rngGeneratorSeed);
+			}
 		}
 
-		const uint pixelIndex = pixelIndexBase + (pixelIndexOffset + pixelIndexRandomStart) % SOBOL_OCL_WORK_SIZE;
-		if (pixelIndex >= filmRegionPixelCount) {
+		// Transform the bucket index in a pixel coordinate
+
+		const uint pixelBucketIndex = (bucketIndex / overlapping) * bucketSize + pixelOffset;
+		const uint mortonCurveOffset = pixelBucketIndex % (tileSize * tileSize);
+		const uint pixelTileIndex = pixelBucketIndex / (tileSize * tileSize);
+
+		const uint subRegionPixelX = (pixelTileIndex % tiletWidthCount) * tileSize + DecodeMorton2X(mortonCurveOffset);
+		const uint subRegionPixelY = (pixelTileIndex / tiletWidthCount) * tileSize + DecodeMorton2Y(mortonCurveOffset);
+		if ((subRegionPixelX >= subRegionWidth) || (subRegionPixelY >= subRegionHeight)) {
 			// Skip the pixels out of the film sub region
 			continue;
 		}
 
-		const uint subRegionWidth = filmSubRegion1 - filmSubRegion0 + 1;
-		const uint pixelX = filmSubRegion0 + (pixelIndex % subRegionWidth);
-		const uint pixelY = filmSubRegion2 + (pixelIndex / subRegionWidth);
+		const uint pixelX = filmSubRegion0 + subRegionPixelX;
+		const uint pixelY = filmSubRegion2 + subRegionPixelY;
 
-#if defined(PARAM_FILM_CHANNELS_HAS_CONVERGENCE)
-		if ((adaptiveStrength > 0.f) && (filmConvergence[pixelX + pixelY * filmWidth] == 0.f)) {
-			// This pixel is already under the convergence threshold. Check if to
-			// render or not
-			if (Rnd_FloatValue(seed) < adaptiveStrength) {
-				// Skip this pixel and try the next one
-				continue;
+		if (filmNoise) {
+			const float adaptiveStrength = sampler->sobol.adaptiveStrength;
+
+			if (adaptiveStrength > 0.f) {
+				// Pixels are sampled in accordance with how far from convergence they are
+				const float noise = filmNoise[pixelX + pixelY * filmWidth];
+
+				// Factor user driven importance sampling too
+				float threshold;
+				if (filmUserImportance) {
+					const float userImportance = filmUserImportance[pixelX + pixelY * filmWidth];
+
+					// Noise is initialized to INFINITY at start
+					if (isinf(noise))
+						threshold = userImportance;
+					else
+						threshold = (userImportance > 0.f) ? Lerp(sampler->sobol.adaptiveUserImportanceWeight, noise, userImportance) : 0.f;
+				} else
+					threshold = noise;
+
+				// The floor for the pixel importance is given by the adaptiveness strength
+				threshold = fmax(threshold, 1.f - adaptiveStrength);
+
+				if (Rnd_FloatValue(seed) > threshold) {
+					// Skip this pixel and try the next one
+
+					// Workaround for preserving random number distribution behavior
+					Rnd_UintValue(&rngGeneratorSeed);
+					Rnd_FloatValue(&rngGeneratorSeed);
+					Rnd_FloatValue(&rngGeneratorSeed);
+
+					continue;
+				}
 			}
 		}
+
+		//----------------------------------------------------------------------
+		// This code crashes the AMD OpenCL compiler:
+		//
+		// The array of fields is attached to the SamplerSharedData structure
+#if !defined(LUXCORE_AMD_OPENCL)
+		__global uint *pixelPasses = SobolSampler_GetPassesPtr(samplerSharedData);
+		// Get the pass to do
+		sample->pass = atomic_inc(&pixelPasses[subRegionPixelX + subRegionPixelY * subRegionWidth]);
+#else   //----------------------------------------------------------------------
+		// This one works:
+		//
+		// The array of fields is attached to the SamplerSharedData structure
+		__global uint *pixelPass = SobolSampler_GetPassesPtr(samplerSharedData) + (subRegionPixelX + subRegionPixelY * subRegionWidth);
+		// Get the pass to do
+		uint oldVal, newVal;
+		do {
+				oldVal = *pixelPass;
+				newVal = oldVal + 1;
+		} while (atomic_cmpxchg(pixelPass, oldVal, newVal) != oldVal);
+		sample->pass = oldVal;
 #endif
+		//----------------------------------------------------------------------
 
 		// Initialize rng0 and rng1
 
-		Seed rngGeneratorSeed = sample->rngGeneratorSeed;
 		// Limit the number of pass skipped
 		sample->rngPass = Rnd_UintValue(&rngGeneratorSeed);
 		sample->rng0 = Rnd_FloatValue(&rngGeneratorSeed);
 		sample->rng1 = Rnd_FloatValue(&rngGeneratorSeed);
-		sample->rngGeneratorSeed = rngGeneratorSeed;
 
 		// Initialize IDX_SCREEN_X and IDX_SCREEN_Y sample
 
-		sampleDataPathBase[IDX_SCREEN_X] = pixelX + SobolSequence_GetSample(sample, IDX_SCREEN_X);
-		sampleDataPathBase[IDX_SCREEN_Y] = pixelY + SobolSequence_GetSample(sample, IDX_SCREEN_Y);
+		__global const uint* restrict sobolDirections = SobolSampler_GetSobolDirectionsPtr(samplerSharedData);
+		samplesData[IDX_SCREEN_X] = pixelX + SobolSequence_GetSample(sobolDirections, sample->pass, sample->rngPass, sample->rng0, sample->rng1, IDX_SCREEN_X);
+		samplesData[IDX_SCREEN_Y] = pixelY + SobolSequence_GetSample(sobolDirections, sample->pass, sample->rngPass, sample->rng0, sample->rng1, IDX_SCREEN_Y);
 		break;
 	}
+	
+	sample->rngGeneratorSeed = rngGeneratorSeed;
 
-	// Save the new value
-	sample->pixelIndexOffset = pixelIndexOffset;
+	// Save the new values
+	sample->pixelOffset = pixelOffset;
+	sample->passOffset = passOffset;
 }
 
-OPENCL_FORCE_INLINE __global float *Sampler_GetSampleData(__global Sample *sample, __global float *samplesData) {
+OPENCL_FORCE_INLINE void SobolSampler_NextSample(
+		__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global float *filmNoise,
+		__global float *filmUserImportance,
+		const uint filmWidth, const uint filmHeight,
+		const uint filmSubRegion0, const uint filmSubRegion1,
+		const uint filmSubRegion2, const uint filmSubRegion3
+		SAMPLER_PARAM_DECL) {
+	SobolSampler_InitNewSample(taskConfig,
+			filmNoise,
+			filmUserImportance,
+			filmWidth, filmHeight,
+			filmSubRegion0, filmSubRegion1, filmSubRegion2, filmSubRegion3
+			SAMPLER_PARAM);
+}
+
+OPENCL_FORCE_INLINE bool SobolSampler_Init(__constant const GPUTaskConfiguration* restrict taskConfig,
+		__global float *filmNoise,
+		__global float *filmUserImportance,
+		const uint filmWidth, const uint filmHeight,
+		const uint filmSubRegion0, const uint filmSubRegion1,
+		const uint filmSubRegion2, const uint filmSubRegion3
+		SAMPLER_PARAM_DECL) {
 	const size_t gid = get_global_id(0);
-	return &samplesData[gid * TOTAL_U_SIZE];
-}
+	__constant const Sampler *sampler = &taskConfig->sampler;
+	__global SobolSample *samples = (__global SobolSample *)samplesBuff;
+	__global SobolSample *sample = &samples[gid];
 
-OPENCL_FORCE_INLINE __global float *Sampler_GetSampleDataPathBase(__global Sample *sample, __global float *sampleData) {
-	return sampleData;
-}
+	const uint bucketSize = sampler->sobol.bucketSize;
+	sample->pixelOffset = bucketSize * bucketSize;
+	sample->passOffset = sampler->sobol.superSampling;
 
-OPENCL_FORCE_INLINE __global float *Sampler_GetSampleDataPathVertex(__global Sample *sample,
-		__global float *sampleDataPathBase, const uint depth) {
-	// This is never used in Sobol sampler
-	return &sampleDataPathBase[IDX_BSDF_OFFSET + (depth - 1) * VERTEX_SAMPLE_SIZE];
-}
-
-OPENCL_FORCE_INLINE float Sampler_GetSamplePath(Seed *seed, __global Sample *sample,
-		__global float *sampleDataPathBase, const uint index) {
-	switch (index) {
-		case IDX_SCREEN_X:
-			return sampleDataPathBase[IDX_SCREEN_X];
-		case IDX_SCREEN_Y:
-			return sampleDataPathBase[IDX_SCREEN_Y];
-		default:
-			return SobolSequence_GetSample(sample, index);
-	}
-}
-
-OPENCL_FORCE_INLINE float Sampler_GetSamplePathVertex(Seed *seed, __global Sample *sample,
-		__global float *sampleDataPathVertexBase,
-		const uint depth, const uint index) {
-	// The depth used here is counted from the first hit point of the path
-	// vertex (so it is effectively depth - 1)
-	if (depth < SOBOL_MAX_DEPTH)
-		return SobolSequence_GetSample(sample, IDX_BSDF_OFFSET + depth * VERTEX_SAMPLE_SIZE + index);
-	else
-		return Rnd_FloatValue(seed);
-}
-
-OPENCL_FORCE_NOT_INLINE void Sampler_SplatSample(
-		Seed *seed,
-		__global SamplerSharedData *samplerSharedData,
-		__global Sample *sample, __global float *sampleData
-		FILM_PARAM_DECL
-		) {
-	Film_AddSample(sample->result.pixelX, sample->result.pixelY,
-			&sample->result, 1.f
-			FILM_PARAM);
-}
-
-OPENCL_FORCE_NOT_INLINE void Sampler_NextSample(
-		Seed *seed,
-		__global SamplerSharedData *samplerSharedData,
-		__global Sample *sample,
-		__global float *sampleData,
-#if defined(PARAM_FILM_CHANNELS_HAS_CONVERGENCE)
-		__global float *filmConvergence,
-#endif
-		const uint filmWidth, const uint filmHeight,
-		const uint filmSubRegion0, const uint filmSubRegion1,
-		const uint filmSubRegion2, const uint filmSubRegion3) {
-	Sampler_InitNewSample(seed, samplerSharedData, sample, sampleData,
-#if defined(PARAM_FILM_CHANNELS_HAS_CONVERGENCE)
-			filmConvergence,
-#endif
+	SobolSampler_NextSample(taskConfig,
+			filmNoise,
+			filmUserImportance,
 			filmWidth, filmHeight,
-			filmSubRegion0, filmSubRegion1, filmSubRegion2, filmSubRegion3);
-}
-
-OPENCL_FORCE_NOT_INLINE bool Sampler_Init(Seed *seed, __global SamplerSharedData *samplerSharedData,
-		__global Sample *sample, __global float *sampleData,
-#if defined(PARAM_FILM_CHANNELS_HAS_CONVERGENCE)
-		__global float *filmConvergence,
-#endif
-		const uint filmWidth, const uint filmHeight,
-		const uint filmSubRegion0, const uint filmSubRegion1,
-		const uint filmSubRegion2, const uint filmSubRegion3) {
-	sample->pixelIndexOffset = SOBOL_OCL_WORK_SIZE;
-
-	Sampler_NextSample(seed, samplerSharedData, sample, sampleData,
-#if defined(PARAM_FILM_CHANNELS_HAS_CONVERGENCE)
-			filmConvergence,
-#endif
-			filmWidth, filmHeight,
-			filmSubRegion0, filmSubRegion1, filmSubRegion2, filmSubRegion3);
+			filmSubRegion0, filmSubRegion1, filmSubRegion2, filmSubRegion3
+			SAMPLER_PARAM);
 
 	return true;
 }
-
-#endif

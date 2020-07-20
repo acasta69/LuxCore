@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -28,6 +28,8 @@
 
 namespace luxrays {
 
+class HardwareIntersectionDevice;
+
 // MBVHAccel Declarations
 class MBVHAccel : public Accelerator {
 public:
@@ -36,8 +38,10 @@ public:
 	virtual ~MBVHAccel();
 
 	virtual AcceleratorType GetType() const { return ACCEL_MBVH; }
-	virtual OpenCLKernels *NewOpenCLKernels(OpenCLIntersectionDevice *device,
-		const u_int kernelCount) const;
+
+	virtual bool HasDataParallelSupport(const IntersectionDevice &device) const;
+	virtual HardwareIntersectionKernel *NewHardwareIntersectionKernel(HardwareIntersectionDevice &device) const;
+
 	virtual void Init(const std::deque<const Mesh *> &meshes,
 		const u_longlong totalVertexCount,
 		const u_longlong totalTriangleCount);
@@ -47,9 +51,7 @@ public:
 
 	virtual bool Intersect(const Ray *ray, RayHit *hit) const;
 
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-	friend class OpenCLMBVHKernels;
-#endif
+	friend class MBVHKernel;
 
 private:
 	static bool MeshPtrCompare(const Mesh *, const Mesh *);

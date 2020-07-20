@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -39,15 +39,22 @@ class PhotonGICache;
 class TracePhotonsThread {
 public:
 	struct RadiancePhotonEntry {
-		RadiancePhotonEntry(const u_int visPartIndex,
-			const luxrays::Spectrum &rad) : visibilityParticelIndex(visPartIndex), alpha(rad) {
+		RadiancePhotonEntry(const u_int visPartIndex, const u_int id,
+			const luxrays::Spectrum &rad) : visibilityParticelIndex(visPartIndex),
+			lightID(id), alpha(rad) {
 		}
 
 		u_int visibilityParticelIndex;
+		u_int lightID;
 		luxrays::Spectrum alpha;
 	};
 
-	TracePhotonsThread(PhotonGICache &pgic, const u_int index);
+	TracePhotonsThread(PhotonGICache &pgic, const u_int index,
+		const u_int seedBase, const u_int photonTracedCount,
+		const bool indirectCacheDone, const bool causticCacheDone,
+		boost::atomic<u_int> &gPhotonsCounter, boost::atomic<u_int> &gIndirectPhotonsTraced,
+		boost::atomic<u_int> &gCausticPhotonsTraced, boost::atomic<u_int> &gIndirectSize,
+		boost::atomic<u_int> &gCausticSize);
 	virtual ~TracePhotonsThread();
 
 	void Start();
@@ -75,7 +82,13 @@ private:
 	void RenderFunc();
 
 	PhotonGICache &pgic;
-	const u_int threadIndex;
+	const u_int threadIndex, seedBase, photonTracedCount;
+
+	boost::atomic<u_int> &globalPhotonsCounter;
+	boost::atomic<u_int> &globalIndirectPhotonsTraced;
+	boost::atomic<u_int> &globalCausticPhotonsTraced;
+	boost::atomic<u_int> &globalIndirectSize;
+	boost::atomic<u_int> &globalCausticSize;
 
 	boost::thread *renderThread;
 

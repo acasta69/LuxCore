@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -29,7 +29,8 @@ namespace slg {
 
 class Glossy2Material : public Material {
 public:
-	Glossy2Material(const Texture *transp, const Texture *emitted, const Texture *bump,
+	Glossy2Material(const Texture *frontTransp, const Texture *backTransp,
+			const Texture *emitted, const Texture *bump,
 			const Texture *kd, const Texture *ks, const Texture *u, const Texture *v,
 			const Texture *ka, const Texture *d, const Texture *i, const bool mbounce);
 
@@ -44,7 +45,7 @@ public:
 	virtual luxrays::Spectrum Sample(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const;
+		float *pdfW, BSDFEvent *event, const BSDFEvent eventHint = NONE) const;
 	virtual void Pdf(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const;

@@ -1,7 +1,7 @@
 #line 2 "filmdenoiser_funcs.cl"
 
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -17,8 +17,6 @@
  * See the License for the specific language governing permissions and     *
  * limitations under the License.                                          *
  ***************************************************************************/
-
-#if defined(PARAM_FILM_DENOISER)
 
 OPENCL_FORCE_INLINE void SamplesAccumulator_AtomicAdd(__global float *buff,
 		const uint buffWidth, const uint buffHeight, const uint buffDepth,
@@ -49,41 +47,41 @@ OPENCL_FORCE_INLINE void SamplesAccumulator_AddSampleAtomic(
 	SamplesAccumulator_AtomicAdd(filmDenoiserMeanImage,
 			filmWidth, filmHeight, 3,
 			line, column, 0,
-			weight * sample.s0);
+			weight * sample.x);
 	SamplesAccumulator_AtomicAdd(filmDenoiserMeanImage,
 			filmWidth, filmHeight, 3,
 			line, column, 1,
-			weight * sample.s1);
+			weight * sample.y);
 	SamplesAccumulator_AtomicAdd(filmDenoiserMeanImage,
 			filmWidth, filmHeight, 3,
 			line, column, 2,
-			weight * sample.s2);
+			weight * sample.z);
 
 	// Covariance
 	SamplesAccumulator_AtomicAdd(filmDenoiserCovarImage,
 			filmWidth, filmHeight, 6,
 			line, column, 0,
-			weight * sample.s0 * sample.s0);
+			weight * sample.x * sample.x);
 	SamplesAccumulator_AtomicAdd(filmDenoiserCovarImage,
 			filmWidth, filmHeight, 6,
 			line, column, 1,
-			weight * sample.s1 * sample.s1);
+			weight * sample.y * sample.y);
 	SamplesAccumulator_AtomicAdd(filmDenoiserCovarImage,
 			filmWidth, filmHeight, 6,
 			line, column, 2,
-			weight * sample.s2 * sample.s2);
+			weight * sample.z * sample.z);
 	SamplesAccumulator_AtomicAdd(filmDenoiserCovarImage,
 			filmWidth, filmHeight, 6,
 			line, column, 3,
-			weight * sample.s1 * sample.s2);
+			weight * sample.y * sample.z);
 	SamplesAccumulator_AtomicAdd(filmDenoiserCovarImage,
 			filmWidth, filmHeight, 6,
 			line, column, 4,
-			weight * sample.s0 * sample.s2);
+			weight * sample.x * sample.z);
 	SamplesAccumulator_AtomicAdd(filmDenoiserCovarImage,
 			filmWidth, filmHeight, 6,
 			line, column, 5,
-			weight * sample.s0 * sample.s1);
+			weight * sample.x * sample.y);
 
 	int floorBinIndex;
 	int ceilBinIndex;
@@ -92,7 +90,7 @@ OPENCL_FORCE_INLINE void SamplesAccumulator_AddSampleAtomic(
 	float ceilBinWeight;
 
 	for (int channelIndex = 0; channelIndex < 3; ++channelIndex) { // fill histogram; code refactored from Ray Histogram Fusion PBRT code
-		float value = (channelIndex == 0) ? sample.s0 : ((channelIndex == 1) ? sample.s1 : sample.s2);
+		float value = (channelIndex == 0) ? sample.x : ((channelIndex == 1) ? sample.y : sample.z);
 		value = (value > 0 ? value : 0);
 		if (filmDenoiserGamma > 1)
 			value = pow(value, 1.f / filmDenoiserGamma); // exponential scaling
@@ -127,6 +125,7 @@ OPENCL_FORCE_INLINE void SamplesAccumulator_AddSampleAtomic(
 }
 
 OPENCL_FORCE_INLINE void FilmDenoiser_AddSample(
+		__constant const Film* restrict film,
 		const uint x, const uint y,
 		__global SampleResult *sampleResult,
 		const float weight,
@@ -135,7 +134,7 @@ OPENCL_FORCE_INLINE void FilmDenoiser_AddSample(
 	if (!filmDenoiserWarmUpDone)
 		return;
 
-	const float3 sample = clamp(SampleResult_GetSpectrum(sampleResult, filmRadianceGroupScale) * filmDenoiserSampleScale,
+	const float3 sample = clamp(SampleResult_GetSpectrum(film,sampleResult, filmRadianceGroupScale) * filmDenoiserSampleScale,
 			0.f, filmDenoiserMaxValue);
 	
 	if (!Spectrum_IsNanOrInf(sample)) {
@@ -147,5 +146,3 @@ OPENCL_FORCE_INLINE void FilmDenoiser_AddSample(
 					FILM_DENOISER_PARAM);
 	}
 }
-
-#endif

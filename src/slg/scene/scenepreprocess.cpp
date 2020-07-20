@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -35,28 +35,6 @@ void Scene::PreprocessCamera(const u_int filmWidth, const u_int filmHeight, cons
 
 void Scene::Preprocess(Context *ctx, const u_int filmWidth, const u_int filmHeight,
 		const u_int *filmSubRegion, const bool useRTMode) {
-	if (lightDefs.GetSize() == 0) {
-		throw runtime_error("The scene doesn't include any light source (note: volume emission doesn't count for this check)");
-
-		// There may be only a volume emitting light. However I ignore this case
-		// because a lot of code has been written assuming that there is always
-		// at least one light source (i.e. for direct light sampling).
-		/*bool hasEmittingVolume = false;
-		for (u_int i = 0; i < matDefs.GetSize(); ++i) {
-			const Material *mat = matDefs.GetMaterial(i);
-			// Check if it is a volume
-			const Volume *vol = dynamic_cast<const Volume *>(mat);
-			if (vol && vol->GetVolumeEmissionTexture() &&
-					(vol->GetVolumeEmissionTexture()->Y() > 0.f)) {
-				hasEmittingVolume = true;
-				break;
-			}
-		}
-
-		if (!hasEmittingVolume)
-			throw runtime_error("The scene doesn't include any light source");*/
-	}
-
 	//--------------------------------------------------------------------------
 	// Check if I have to update geometry
 	//--------------------------------------------------------------------------
@@ -121,8 +99,7 @@ void Scene::Preprocess(Context *ctx, const u_int filmWidth, const u_int filmHeig
 	}
 
 	// And for visibility maps
-	if (!useRTMode)
-		lightDefs.UpdateVisibilityMaps(this);
+	lightDefs.UpdateVisibilityMaps(this, useRTMode);
 
 	//--------------------------------------------------------------------------
 	// Reset the edit actions

@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -41,20 +41,24 @@ public:
 	SobolSamplerSharedData(const u_int seed, Film *engineFlm);
 	virtual ~SobolSamplerSharedData() { }
 
+	virtual void Reset();
+
+	void GetNewBucket(const u_int bucketCount, u_int *bucketIndex, u_int *seed);
+	u_int GetNewPixelPass(const u_int pixelIndex = 0);
+	
 	static SamplerSharedData *FromProperties(const luxrays::Properties &cfg,
 			luxrays::RandomGenerator *rndGen, Film *film);
-
-	void GetNewPixelIndex(u_int &index, u_int &sobolPass, u_int &seed);
 
 	Film *engineFilm;
 	u_int seedBase;
 	u_int filmRegionPixelCount;
 
 private:
-	void Init(const u_int seed, Film *engineFlm);
+	u_int bucketIndex;
 
-	luxrays::SpinLock spinLock;
-	u_int pixelIndex, pass;
+	// Holds the current pass for each pixel when using adaptive sampling
+	std::vector<u_int> passPerPixel;
+
 };
 
 //------------------------------------------------------------------------------
@@ -63,20 +67,18 @@ private:
 // This sampler is based on Blender Cycles Sobol implementation.
 //------------------------------------------------------------------------------
 
-#define SOBOL_STARTOFFSET 32
-#define SOBOL_THREAD_WORK_SIZE 4096
-
 class SobolSampler : public Sampler {
 public:
 	SobolSampler(luxrays::RandomGenerator *rnd, Film *flm,
-			const FilmSampleSplatter *flmSplatter,
-			const float adaptiveStr,
-			SobolSamplerSharedData *samplerSharedData);
+			const FilmSampleSplatter *flmSplatter, const bool imgSamplesEnable,
+			const float adaptiveStr, const float adaptiveUserImpWeight,
+			const u_int bucketSize, const u_int tileSize, const u_int superSampling,
+			const u_int overlapping, SobolSamplerSharedData *samplerSharedData);
 	virtual ~SobolSampler();
 
 	virtual SamplerType GetType() const { return GetObjectType(); }
 	virtual std::string GetTag() const { return GetObjectTag(); }
-	virtual void RequestSamples(const u_int size);
+	virtual void RequestSamples(const SampleType sampleType, const u_int size);
 
 	virtual float GetSample(const u_int index);
 	virtual void NextSample(const std::vector<SampleResult> &sampleResults);
@@ -103,9 +105,10 @@ private:
 
 	SobolSamplerSharedData *sharedData;
 	SobolSequence sobolSequence;
-	float adaptiveStrength;
+	float adaptiveStrength, adaptiveUserImportanceWeight;
+	u_int bucketSize, tileSize, superSampling, overlapping;
 
-	u_int pixelIndexBase, pixelIndexOffset, pass;
+	u_int bucketIndex, pixelOffset, passOffset, pass;
 	luxrays::TauswortheRandomGenerator rngGenerator;
 
 	float sample0, sample1;

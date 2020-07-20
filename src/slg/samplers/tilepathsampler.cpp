@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -40,8 +40,8 @@ SamplerSharedData *TilePathSamplerSharedData::FromProperties(const Properties &c
 //------------------------------------------------------------------------------
 
 TilePathSampler::TilePathSampler(luxrays::RandomGenerator *rnd, Film *flm,
-		const FilmSampleSplatter *flmSplatter) : Sampler(rnd, flm, flmSplatter),
-		sobolSequence(), rngGenerator() {
+		const FilmSampleSplatter *flmSplatter) : Sampler(rnd, flm, flmSplatter, true),
+		sobolSequence() {
 	aaSamples = 1;
 }
 
@@ -52,26 +52,30 @@ void TilePathSampler::SetAASamples(const u_int aaSamp) {
 	aaSamples = aaSamp;
 }
 
-void TilePathSampler::RequestSamples(const u_int size) {
+void TilePathSampler::RequestSamples(const SampleType smplType, const u_int size) {
+	Sampler::RequestSamples(smplType, size);
+
 	sobolSequence.RequestSamples(size);
 }
 
 void TilePathSampler::InitNewSample() {
 	// Initialize rng0, rng1 and rngPass
-
-	sobolSequence.rng0 = rngGenerator.floatValue();
-	sobolSequence.rng1 = rngGenerator.floatValue();
-	// Limit the number of pass skipped
-	sobolSequence.rngPass = rngGenerator.uintValue();
+	const u_int pixelRngGenSeed = (tileWork->GetCoord().x + tileX + (tileWork->GetCoord().y + tileY) * film->GetWidth() + 1) *
+			(tileWork->multipassIndexToRender + 1);
+	TauswortheRandomGenerator pixelRngGen(pixelRngGenSeed);
+	sobolSequence.rngPass = pixelRngGen.uintValue();
+	sobolSequence.rng0 = pixelRngGen.floatValue();
+	sobolSequence.rng1 = pixelRngGen.floatValue();
 
 	// Initialize sample0 and sample1
-
 	const u_int *subRegion = film->GetSubRegion();
 	sample0 = tileWork->GetCoord().x - subRegion[0] + tileX + sobolSequence.GetSample(tilePass, 0);
 	sample1 = tileWork->GetCoord().y - subRegion[2] + tileY + sobolSequence.GetSample(tilePass, 1);
 }
 
 float TilePathSampler::GetSample(const u_int index) {
+	assert (index < requestedSamples);
+
 	switch (index) {
 		case 0:
 			return sample0;
@@ -83,7 +87,7 @@ float TilePathSampler::GetSample(const u_int index) {
 }
 
 void TilePathSampler::NextSample(const vector<SampleResult> &sampleResults) {
-	tileFilm->AddSampleCount(1.0);
+	tileFilm->AddSampleCount(threadIndex, 1.0, 0.0);
 	tileFilm->AddSample(tileX, tileY, sampleResults[0]);
 
 	++tileX;
@@ -104,10 +108,6 @@ void TilePathSampler::NextSample(const vector<SampleResult> &sampleResults) {
 void TilePathSampler::Init(TileWork *tWork, Film *tFilm) {
 	tileWork = tWork;
 	tileFilm = tFilm;
-
-	// To have always the same sequence for each tile
-	const u_int seed = tileWork->GetTileSeed();
-	rngGenerator.init(seed);
 
 	tileX = 0;
 	tileY = 0;

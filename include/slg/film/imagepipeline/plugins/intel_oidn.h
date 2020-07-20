@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -38,7 +38,8 @@ namespace slg {
 
 class IntelOIDN : public ImagePipelinePlugin {
 public:
-	IntelOIDN();
+	IntelOIDN(const std::string filterType,
+			const int oidnMemLimit, const float sharpness);
 
 	virtual ImagePipelinePlugin *Copy() const;
 
@@ -47,15 +48,28 @@ public:
 	friend class boost::serialization::access;
 
 private:
+	// Used by serialization
+	IntelOIDN();
+
 	template<class Archive> void serialize(Archive &ar, const u_int version) {
 		ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(ImagePipelinePlugin);
+		ar & oidnMemLimit;
+		ar & iTileCount;
+		ar & jTileCount;
+		ar & sharpness;
 	}
+
+	std::string filterType;
+	u_int iTileCount;
+	u_int jTileCount;
+	int oidnMemLimit; //needs to be signed int for OIDN call
+	float sharpness;
 };
 
 }
 
 
-BOOST_CLASS_VERSION(slg::IntelOIDN, 1)
+BOOST_CLASS_VERSION(slg::IntelOIDN, 3)
 
 BOOST_CLASS_EXPORT_KEY(slg::IntelOIDN)
 

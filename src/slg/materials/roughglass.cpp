@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -18,6 +18,7 @@
 
 #include "slg/textures/fresnel/fresneltexture.h"
 #include "slg/materials/roughglass.h"
+#include "slg/materials/thinfilmcoating.h"
 
 using namespace std;
 using namespace luxrays;
@@ -29,12 +30,15 @@ using namespace slg;
 // LuxRender RoughGlass material porting.
 //------------------------------------------------------------------------------
 
-RoughGlassMaterial::RoughGlassMaterial(const Texture *transp, const Texture *emitted, const Texture *bump,
-			const Texture *refl, const Texture *trans,
-			const Texture *exteriorIorFact, const Texture *interiorIorFact,
-			const Texture *u, const Texture *v) :
-			Material(transp, emitted, bump), Kr(refl), Kt(trans),
-			exteriorIor(exteriorIorFact), interiorIor(interiorIorFact), nu(u), nv(v) {
+RoughGlassMaterial::RoughGlassMaterial(const Texture *frontTransp, const Texture *backTransp,
+		const Texture *emitted, const Texture *bump,
+		const Texture *refl, const Texture *trans,
+		const Texture *exteriorIorFact, const Texture *interiorIorFact,
+		const Texture *u, const Texture *v,
+		const Texture *filmThickness, const Texture *filmIor) :
+			Material(frontTransp, backTransp, emitted, bump), Kr(refl), Kt(trans),
+			exteriorIor(exteriorIorFact), interiorIor(interiorIorFact), nu(u), nv(v),
+			filmThickness(filmThickness), filmIor(filmIor) {
 	glossiness = ComputeGlossiness(nu, nv);
 }
 
@@ -94,6 +98,8 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 			G / (cosThetaI * lengthSquared)) *
 			kt * (1.f - F);
 
+		*event = GLOSSY | TRANSMIT;
+
 		return result;
 	} else {
 		// Reflect
@@ -122,6 +128,13 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 
 		const Spectrum result = (D * G / (4.f * cosThetaI)) * kr * F;
 
+		*event = GLOSSY | REFLECT;
+		
+		const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
+		if (localFilmThickness > 0.f) {
+			const float localFilmIor = filmIor ? filmIor->GetFloatValue(hitPoint) : 1.f;
+			return result * CalcFilmColor(localEyeDir, localFilmThickness, localFilmIor);
+		}
 		return result;
 	}
 }
@@ -129,7 +142,7 @@ Spectrum RoughGlassMaterial::Evaluate(const HitPoint &hitPoint,
 Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		const Vector &localFixedDir, Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const {
+		float *pdfW, BSDFEvent *event, const BSDFEvent eventHint) const {
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
@@ -197,7 +210,6 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 			return Spectrum();
 
 		const float cosi = fabsf(localSampledDir->z);
-		*absCosSampledDir = cosi;
 
 		const float G = SchlickDistribution_G(roughness, localFixedDir, *localSampledDir);
 		float factor = (d / specPdf) * G * fabsf(cosThetaOH) / threshold;
@@ -221,8 +233,7 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		*localSampledDir = 2.f * cosThetaOH * wh - localFixedDir;
 
 		const float cosi = fabsf(localSampledDir->z);
-		*absCosSampledDir = cosi;
-		if ((*absCosSampledDir < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
+		if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
 			return Spectrum();
 
 		const float G = SchlickDistribution_G(roughness, localFixedDir, *localSampledDir);
@@ -231,6 +242,12 @@ Spectrum RoughGlassMaterial::Sample(const HitPoint &hitPoint,
 		const float F = FresnelTexture::CauchyEvaluate(ntc, cosThetaOH);
 		factor /= (!hitPoint.fromLight) ? coso : cosi;
 		result = factor * F * kr;
+		
+		const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
+		if (localFilmThickness > 0.f) {
+			const float localFilmIor = filmIor ? filmIor->GetFloatValue(hitPoint) : 1.f;
+			result *= CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor);
+		}
 
 		*pdfW *= (1.f - threshold);
 		*event = GLOSSY | REFLECT;
@@ -327,6 +344,10 @@ void RoughGlassMaterial::AddReferencedTextures(boost::unordered_set<const Textur
 		interiorIor->AddReferencedTextures(referencedTexs);
 	nu->AddReferencedTextures(referencedTexs);
 	nv->AddReferencedTextures(referencedTexs);
+	if (filmThickness)
+		filmThickness->AddReferencedTextures(referencedTexs);
+	if (filmIor)
+		filmIor->AddReferencedTextures(referencedTexs);
 }
 
 void RoughGlassMaterial::UpdateTextureReferences(const Texture *oldTex, const Texture *newTex) {
@@ -349,6 +370,10 @@ void RoughGlassMaterial::UpdateTextureReferences(const Texture *oldTex, const Te
 		nv = newTex;
 		updateGlossiness = true;
 	}
+	if (filmThickness == oldTex)
+		filmThickness = newTex;
+	if (filmIor == oldTex)
+		filmIor = newTex;
 
 	if (updateGlossiness)
 		glossiness = ComputeGlossiness(nu, nv);
@@ -359,14 +384,18 @@ Properties RoughGlassMaterial::ToProperties(const ImageMapCache &imgMapCache, co
 
 	const string name = GetName();
 	props.Set(Property("scene.materials." + name + ".type")("roughglass"));
-	props.Set(Property("scene.materials." + name + ".kr")(Kr->GetName()));
-	props.Set(Property("scene.materials." + name + ".kt")(Kt->GetName()));
+	props.Set(Property("scene.materials." + name + ".kr")(Kr->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".kt")(Kt->GetSDLValue()));
 	if (exteriorIor)
-		props.Set(Property("scene.materials." + name + ".exteriorior")(exteriorIor->GetName()));
+		props.Set(Property("scene.materials." + name + ".exteriorior")(exteriorIor->GetSDLValue()));
 	if (interiorIor)
-		props.Set(Property("scene.materials." + name + ".interiorior")(interiorIor->GetName()));
-	props.Set(Property("scene.materials." + name + ".uroughness")(nu->GetName()));
-	props.Set(Property("scene.materials." + name + ".vroughness")(nv->GetName()));
+		props.Set(Property("scene.materials." + name + ".interiorior")(interiorIor->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
+	if (filmThickness)
+		props.Set(Property("scene.materials." + name + ".filmthickness")(filmThickness->GetSDLValue()));
+	if (filmIor)
+		props.Set(Property("scene.materials." + name + ".filmior")(filmIor->GetSDLValue()));
 	props.Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

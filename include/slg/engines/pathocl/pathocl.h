@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -33,7 +33,7 @@ class PathOCLRenderEngine;
 
 class PathOCLOpenCLRenderThread : public PathOCLBaseOCLRenderThread {
 public:
-	PathOCLOpenCLRenderThread(const u_int index, luxrays::OpenCLIntersectionDevice *device,
+	PathOCLOpenCLRenderThread(const u_int index, luxrays::HardwareIntersectionDevice *device,
 			PathOCLRenderEngine *re);
 	virtual ~PathOCLOpenCLRenderThread();
 
@@ -52,7 +52,7 @@ protected:
 
 class PathOCLNativeRenderThread : public PathOCLBaseNativeRenderThread {
 public:
-	PathOCLNativeRenderThread(const u_int index, luxrays::NativeThreadIntersectionDevice *device,
+	PathOCLNativeRenderThread(const u_int index, luxrays::NativeIntersectionDevice *device,
 			PathOCLRenderEngine *re);
 	virtual ~PathOCLNativeRenderThread();
 
@@ -99,9 +99,9 @@ protected:
 	static const luxrays::Properties &GetDefaultProps();
 
 	virtual PathOCLBaseOCLRenderThread *CreateOCLThread(const u_int index,
-			luxrays::OpenCLIntersectionDevice *device);
+			luxrays::HardwareIntersectionDevice *device);
 	virtual PathOCLBaseNativeRenderThread *CreateNativeThread(const u_int index,
-			luxrays::NativeThreadIntersectionDevice *device);
+			luxrays::NativeIntersectionDevice *device);
 
 	virtual void StartLockLess();
 	virtual void StopLockLess();
@@ -111,7 +111,10 @@ protected:
 	virtual void UpdateCounters();
 	void UpdateTaskCount();
 
-	SamplerSharedData *samplerSharedData;
+	u_int GetTotalEyeSPP() const;
+	
+	SamplerSharedData *eyeSamplerSharedData;
+	SamplerSharedData *lightSamplerSharedData;
 
 	bool hasStartFilm;
 };

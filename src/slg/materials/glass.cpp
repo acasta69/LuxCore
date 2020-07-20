@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -18,6 +18,7 @@
 
 #include "slg/textures/fresnel/fresneltexture.h"
 #include "slg/materials/glass.h"
+#include "slg/materials/thinfilmcoating.h"
 
 using namespace std;
 using namespace luxrays;
@@ -26,6 +27,16 @@ using namespace slg;
 //------------------------------------------------------------------------------
 // Glass material
 //------------------------------------------------------------------------------
+
+GlassMaterial::GlassMaterial(const Texture *frontTransp, const Texture *backTransp,
+		const Texture *emitted, const Texture *bump,
+		const Texture *refl, const Texture *trans,
+		const Texture *exteriorIorFact, const Texture *interiorIorFact,
+		const Texture *C, const Texture *filmThickness, const Texture *filmIor) :
+			Material(frontTransp, backTransp, emitted, bump),
+			Kr(refl), Kt(trans), exteriorIor(exteriorIorFact), interiorIor(interiorIorFact),
+			cauchyC(C), filmThickness(filmThickness), filmIor(filmIor) {
+}
 
 Spectrum GlassMaterial::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
@@ -110,15 +121,22 @@ static float WaveLength2IOR(const float waveLength, const float IOR, const float
 Spectrum GlassMaterial::EvalSpecularReflection(const HitPoint &hitPoint,
 		const Vector &localFixedDir, const Spectrum &kr,
 		const float nc, const float nt,
-		Vector *localSampledDir) {
+		Vector *localSampledDir, 
+		const float localFilmThickness, const float localFilmIor) {
 	if (kr.Black())
 		return Spectrum();
 
-	const float costheta = CosTheta(localFixedDir);
+	const float cosTheta = CosTheta(localFixedDir);
 	*localSampledDir = Vector(-localFixedDir.x, -localFixedDir.y, localFixedDir.z);
 
 	const float ntc = nt / nc;
-	return kr * FresnelTexture::CauchyEvaluate(ntc, costheta);
+	const Spectrum result = kr * FresnelTexture::CauchyEvaluate(ntc, cosTheta);
+
+	if (localFilmThickness > 0.f) {
+		const Spectrum filmColor = CalcFilmColor(localFixedDir, localFilmThickness, localFilmIor);
+		return result * filmColor;
+	}
+	return result;
 }
 
 Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
@@ -144,8 +162,8 @@ Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
 	}
 
 	const float ntc = lnt / nc;
-	const float costheta = CosTheta(localFixedDir);
-	const bool entering = (costheta > 0.f);
+	const float cosTheta = CosTheta(localFixedDir);
+	const bool entering = (cosTheta > 0.f);
 	const float eta = entering ? (nc / lnt) : ntc;
 	const float eta2 = eta * eta;
 	const float sini2 = SinTheta2(localFixedDir);
@@ -163,7 +181,7 @@ Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
 		ce = (1.f - FresnelTexture::CauchyEvaluate(ntc, cost)) * eta2;
 	else {
 		const float absCosSampledDir = fabsf(CosTheta(*localSampledDir));
-		ce = (1.f - FresnelTexture::CauchyEvaluate(ntc, costheta)) * fabsf(localFixedDir.z / absCosSampledDir);
+		ce = (1.f - FresnelTexture::CauchyEvaluate(ntc, cosTheta)) * fabsf(CosTheta(localFixedDir) / absCosSampledDir);
 	}
 
 	return lkt * ce;
@@ -172,7 +190,7 @@ Spectrum GlassMaterial::EvalSpecularTransmission(const HitPoint &hitPoint,
 Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 		const Vector &localFixedDir, Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const {
+		float *pdfW, BSDFEvent *event, const BSDFEvent eventHint) const {
 	const Spectrum kr = Kr->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 	const Spectrum kt = Kt->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 
@@ -185,14 +203,16 @@ Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 	const Spectrum trans = EvalSpecularTransmission(hitPoint, localFixedDir, u0,
 			kt, nc, nt, cauchyCValue, &transLocalSampledDir);
 	
+	const float localFilmThickness = filmThickness ? filmThickness->GetFloatValue(hitPoint) : 0.f;
+	const float localFilmIor = (localFilmThickness > 0.f && filmIor) ? filmIor->GetFloatValue(hitPoint) : 1.f;
 	Vector reflLocalSampledDir;
 	const Spectrum refl = EvalSpecularReflection(hitPoint, localFixedDir,
-			kr, nc, nt, &reflLocalSampledDir);
+			kr, nc, nt, &reflLocalSampledDir, localFilmThickness, localFilmIor);
 
 	// Decide to transmit or reflect
 	float threshold;
-	if (!refl.Black()) {
-		if (!trans.Black()) {
+	if (!refl.Black() && (eventHint != TRANSMIT)) {
+		if (!trans.Black() && (eventHint != REFLECT)) {
 			// Importance sampling
 			const float reflFilter = refl.Filter();
 			const float transFilter = trans.Filter();
@@ -227,8 +247,6 @@ Spectrum GlassMaterial::Sample(const HitPoint &hitPoint,
 		result = refl;
 	}
 	
-	*absCosSampledDir = fabsf(CosTheta(*localSampledDir));
-
 	return result / *pdfW;
 }
 
@@ -250,6 +268,10 @@ void GlassMaterial::AddReferencedTextures(boost::unordered_set<const Texture *> 
 		exteriorIor->AddReferencedTextures(referencedTexs);
 	if (interiorIor)
 		interiorIor->AddReferencedTextures(referencedTexs);
+	if (filmThickness)
+		filmThickness->AddReferencedTextures(referencedTexs);
+	if (filmIor)
+		filmIor->AddReferencedTextures(referencedTexs);
 }
 
 void GlassMaterial::UpdateTextureReferences(const Texture *oldTex, const Texture *newTex) {
@@ -263,6 +285,10 @@ void GlassMaterial::UpdateTextureReferences(const Texture *oldTex, const Texture
 		exteriorIor = newTex;
 	if (interiorIor == oldTex)
 		interiorIor = newTex;
+	if (filmThickness == oldTex)
+		filmThickness = newTex;
+	if (filmIor == oldTex)
+		filmIor = newTex;
 }
 
 Properties GlassMaterial::ToProperties(const ImageMapCache &imgMapCache, const bool useRealFileName) const  {
@@ -270,14 +296,18 @@ Properties GlassMaterial::ToProperties(const ImageMapCache &imgMapCache, const b
 
 	const string name = GetName();
 	props.Set(Property("scene.materials." + name + ".type")("glass"));
-	props.Set(Property("scene.materials." + name + ".kr")(Kr->GetName()));
-	props.Set(Property("scene.materials." + name + ".kt")(Kt->GetName()));
+	props.Set(Property("scene.materials." + name + ".kr")(Kr->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".kt")(Kt->GetSDLValue()));
 	if (exteriorIor)
-		props.Set(Property("scene.materials." + name + ".exteriorior")(exteriorIor->GetName()));
+		props.Set(Property("scene.materials." + name + ".exteriorior")(exteriorIor->GetSDLValue()));
 	if (interiorIor)
-		props.Set(Property("scene.materials." + name + ".interiorior")(interiorIor->GetName()));
+		props.Set(Property("scene.materials." + name + ".interiorior")(interiorIor->GetSDLValue()));
 	if (cauchyC)
-		props.Set(Property("scene.materials." + name + ".cauchyc")(cauchyC->GetName()));
+		props.Set(Property("scene.materials." + name + ".cauchyc")(cauchyC->GetSDLValue()));
+	if (filmThickness)
+		props.Set(Property("scene.materials." + name + ".filmthickness")(filmThickness->GetSDLValue()));
+	if (filmIor)
+		props.Set(Property("scene.materials." + name + ".filmior")(filmIor->GetSDLValue()));
 	props.Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

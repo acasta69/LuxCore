@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -43,17 +43,10 @@ namespace ocl {
 typedef enum {
 	MATTE, MIRROR, GLASS, ARCHGLASS, MIX, NULLMAT, MATTETRANSLUCENT,
 	GLOSSY2, METAL2, ROUGHGLASS, VELVET, CLOTH, CARPAINT, ROUGHMATTE,
-	ROUGHMATTETRANSLUCENT, GLOSSYTRANSLUCENT, GLOSSYCOATING,
+	ROUGHMATTETRANSLUCENT, GLOSSYTRANSLUCENT, GLOSSYCOATING, DISNEY,
 
 	// Volumes
-	HOMOGENEOUS_VOL, CLEAR_VOL, HETEROGENEOUS_VOL,
-
-	// The following types are used (in PATHOCL CompiledScene class) only to
-	// recognize the usage of some specific material option
-	GLOSSY2_ANISOTROPIC, GLOSSY2_ABSORPTION, GLOSSY2_INDEX, GLOSSY2_MULTIBOUNCE,
-	GLOSSYTRANSLUCENT_ANISOTROPIC, GLOSSYTRANSLUCENT_ABSORPTION, GLOSSYTRANSLUCENT_INDEX, GLOSSYTRANSLUCENT_MULTIBOUNCE,
-	GLOSSYCOATING_ANISOTROPIC, GLOSSYCOATING_ABSORPTION, GLOSSYCOATING_INDEX, GLOSSYCOATING_MULTIBOUNCE,
-	METAL2_ANISOTROPIC, ROUGHGLASS_ANISOTROPIC
+	HOMOGENEOUS_VOL, CLEAR_VOL, HETEROGENEOUS_VOL
 } MaterialType;
 
 // Material emission direct light sampling type
@@ -65,7 +58,8 @@ class SampleableSphericalFunction;
 
 class Material : public luxrays::NamedObject {
 public:
-	Material(const Texture *transp, const Texture *emitted, const Texture *bump);
+	Material(const Texture *frontTransp, const Texture *backTransp,
+			const Texture *emitted, const Texture *bump);
 	virtual ~Material();
 
 	void SetLightID(const u_int id) { lightID = id; }
@@ -76,6 +70,10 @@ public:
 	luxrays::Spectrum GetEmittedGain() const { return emittedGain; }
 	void SetEmittedPower(const float v) { emittedPower = v; UpdateEmittedFactor(); }
 	float GetEmittedPower() const { return emittedPower; }
+	void SetEmittedPowerNormalize(const bool v) { emittedPowerNormalize = v; }
+	bool IsEmittedPowerNormalize() { return emittedPowerNormalize; }
+	void SetEmittedGainNormalize(const bool v) { emittedGainNormalize = v; }
+	bool IsEmittedGainNormalize() { return emittedGainNormalize; }
 	void SetEmittedEfficency(const float v) { emittedEfficency = v; UpdateEmittedFactor(); }
 	float GetEmittedEfficency() const { return emittedEfficency; }
 	const luxrays::Spectrum &GetEmittedFactor() const { return emittedFactor; }
@@ -89,9 +87,6 @@ public:
 
 	virtual bool IsLightSource() const {
 		return (emittedTex != NULL);
-	}
-	virtual bool HasBumpTex() const { 
-		return (bumpTex != NULL);
 	}
 	
 	void SetPhotonGIEnabled(const bool v) { isPhotonGIEnabled = v; }
@@ -117,9 +112,13 @@ public:
     float GetBumpSampleDistance() const { return bumpSampleDistance; }
 
 	virtual bool IsDelta() const { return false; }
-	virtual bool IsPassThrough() const { return false; }
+	virtual float GetAvgPassThroughTransparency() const { return avgPassThroughTransparency; }
 	virtual luxrays::Spectrum GetPassThroughTransparency(const HitPoint &hitPoint,
-		const luxrays::Vector &localFixedDir, const float passThroughEvent) const;
+		const luxrays::Vector &localFixedDir, const float passThroughEvent,
+		const bool backTracing) const;
+
+	void SetPassThroughShadowTransparency(const luxrays::Spectrum &t) { passThroughShadowTransparency = t; }
+	const luxrays::Spectrum &GetPassThroughShadowTransparency() const { return passThroughShadowTransparency; }
 
 	virtual luxrays::Spectrum GetEmittedRadiance(const HitPoint &hitPoint,
 		const float oneOverPrimitiveArea) const;
@@ -127,13 +126,15 @@ public:
 
 	const void SetEmittedImportance(const float imp) { emittedImportance = imp; }
 	const float GetEmittedImportance() const { return emittedImportance; }
-	const Texture *GetTransparencyTexture() const { return transparencyTex; }
+	const Texture *GetFrontTransparencyTexture() const { return frontTransparencyTex; }
+	const Texture *GetBackTransparencyTexture() const { return backTransparencyTex; }
 	const Texture *GetEmitTexture() const { return emittedTex; }
 	const Texture *GetBumpTexture() const { return bumpTex; }
+
 	void SetEmissionMap(const ImageMap *map);
 	const ImageMap *GetEmissionMap() const { return emissionMap; }
 	const SampleableSphericalFunction *GetEmissionFunc() const { return emissionFunc; }
-
+	
 	// MixMaterial can have multiple volumes assigned and needs the passThroughEvent
 	// information to be able to return the correct volume
 	void SetInteriorVolume(const Volume *vol) { interiorVolume = vol; }
@@ -152,7 +153,8 @@ public:
 	virtual luxrays::Spectrum Albedo(const HitPoint &hitPoint) const;
 
 	// EvaluateTotal() returns the total reflection given an constant illumination
-	// over the hemisphere. It is currently used only by PhotonGICache.
+	// over the hemisphere. It is currently used only by PhotonGICache and
+	// BakeCPU render engine.
 	//
 	// NOTE: this is called rho() in PBRT sources.
 	virtual luxrays::Spectrum EvaluateTotal(const HitPoint &hitPoint) const;
@@ -171,10 +173,13 @@ public:
 	// used to extend a path, you know where you are coming from and want to
 	// know where to go next. It used by the path tracer to extend eye path and
 	// by BiDir to extend both eye and light path.
+	//
+	// Note: eventHint's valid values TRANSMIT, REFLECT or NONE and it works
+	// only for Delta materials
 	virtual luxrays::Spectrum Sample(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const = 0;
+		float *pdfW, BSDFEvent *event, const BSDFEvent eventHint = NONE) const = 0;
 
 	// Pdf() is used to obtain direct and reverse PDFs while knowing the eye
 	// and light vector. It is used only by BiDir.
@@ -203,6 +208,7 @@ protected:
 			const Texture *t3 = nullptr);
 
 	void UpdateEmittedFactor();
+	virtual void UpdateAvgPassThroughTransparency();
 
 	u_int matID, lightID;
 
@@ -211,8 +217,11 @@ protected:
 	float emittedImportance;
 	luxrays::Spectrum emittedGain, emittedFactor;
 	float emittedPower, emittedEfficency, emittedTheta, emittedCosThetaMax;
+	bool emittedPowerNormalize, emittedGainNormalize;
 
-	const Texture *transparencyTex;
+	const Texture *frontTransparencyTex;
+	const Texture *backTransparencyTex;
+	luxrays::Spectrum passThroughShadowTransparency;
 	const Texture *emittedTex;
 	const Texture *bumpTex;
     float bumpSampleDistance;
@@ -222,7 +231,7 @@ protected:
 
 	const Volume *interiorVolume, *exteriorVolume;
 
-	float glossiness;
+	float glossiness, avgPassThroughTransparency;
 	bool isVisibleIndirectDiffuse, isVisibleIndirectGlossy, isVisibleIndirectSpecular,
 		usePrimitiveArea, isShadowCatcher, isShadowCatcherOnlyInfiniteLights, isPhotonGIEnabled;
 };

@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -32,40 +32,40 @@ void LightStrategyPower::Preprocess(const Scene *scn, const LightStrategyTask ta
 			const bool useRTMode) {
 	DistributionLightStrategy::Preprocess(scn, taskType);
 
+	const u_int lightCount = scene->lightDefs.GetSize();
+	if (lightCount == 0)
+		return;
+
 	const float envRadius = InfiniteLightSource::GetEnvRadius(*scene);
 	const float invEnvRadius2 = 1.f / (envRadius * envRadius);
 
-	const u_int lightCount = scene->lightDefs.GetSize();
 	vector<float> lightPower;
 	lightPower.reserve(lightCount);
 
 	const vector<LightSource *> &lights = scene->lightDefs.GetLightSources();
 	for (u_int i = 0; i < lightCount; ++i) {
 		const LightSource *l = lights[i];
+		float power = l->GetPower(*scene) * l->GetImportance();
+		// In order to avoid over-sampling of distant lights
+		if (l->IsInfinite())
+			power *= invEnvRadius2;
 
 		switch (taskType) {
 			case TASK_EMIT: {
-				lightPower.push_back(l->GetImportance());
+				lightPower.push_back(power);
 				break;
 			}
 			case TASK_ILLUMINATE: {
-				if (l->IsDirectLightSamplingEnabled()) {
-					float power = l->GetPower(*scene);
-					// In order to avoid over-sampling of distant lights
-					if (l->IsInfinite())
-						power *= invEnvRadius2;
-					lightPower.push_back(power * l->GetImportance());
-				} else
+				if (l->IsDirectLightSamplingEnabled())
+					lightPower.push_back(power);
+				else
 					lightPower.push_back(0.f);
 				break;
 			}
 			case TASK_INFINITE_ONLY: {
-				if (l->IsInfinite()){
-					float power = l->GetPower(*scene);
-					// In order to avoid over-sampling of distant lights
-					power *= invEnvRadius2;
-					lightPower.push_back(power * l->GetImportance());
-				} else
+				if (l->IsInfinite())
+					lightPower.push_back(power);
+				else
 					lightPower.push_back(0.f);
 				break;
 			}

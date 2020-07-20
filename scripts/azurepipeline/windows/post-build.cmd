@@ -1,23 +1,22 @@
 :: Gathering and packing binaries
-echo %RELEASE_BUILD%
-if "%RELEASE_BUILD%" EQU "TRUE" (
-    echo This is a release build
-    echo %BUILD_SOURCEVERSION%
-    git tag --points-at %BUILD_SOURCEVERSION%
-    for /f "tokens=2 delims=_" %%a in ('git tag --points-at %BUILD_SOURCEVERSION%') do set GITHUB_TAG=%%a
-) else (
-    set GITHUB_TAG=latest
+echo %VERSION_STRING%
+if "%VERSION_STRING%" EQU "" (
+    set VERSION_STRING=latest
 )
-echo %GITHUB_TAG%
-cd ..\WindowsCompile
-call create-standalone.bat
+echo %VERSION_STRING%
 
-if "%1" EQU "/no-ocl" (
-    set LUX_LATEST=luxcorerender-%GITHUB_TAG%-win64
+cd ..\WindowsCompile
+
+if "%FINAL%" EQU "TRUE" (
+    call create-sdk.bat %1
+    set LUX_LATEST=luxcorerender-%VERSION_STRING%-win64-sdk
 ) else (
-    set LUX_LATEST=luxcorerender-%GITHUB_TAG%-win64-opencl
+    call create-standalone.bat %1
+    set LUX_LATEST=luxcorerender-%VERSION_STRING%-win64
 )
 
 move %DIR% %LUX_LATEST%
-.\support\bin\7za.exe a %LUX_LATEST%.zip %LUX_LATEST%
+.\support\bin\7z.exe a %LUX_LATEST%.zip %LUX_LATEST%
 copy %LUX_LATEST%.zip %BUILD_ARTIFACTSTAGINGDIRECTORY%
+
+@echo ##vso[task.setvariable variable=version_string]%VERSION_STRING%

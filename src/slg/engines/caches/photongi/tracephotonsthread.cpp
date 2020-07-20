@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -18,11 +18,14 @@
 
 #include <boost/format.hpp>
 
+#include "luxrays/utils/thread.h"
+
 #include "slg/scene/scene.h"
 #include "slg/engines/renderengine.h"
 #include "slg/engines/caches/photongi/photongicache.h"
 #include "slg/engines/caches/photongi/tracephotonsthread.h"
 #include "slg/utils/pathdepthinfo.h"
+#include "slg/utils/pathinfo.h"
 
 using namespace std;
 using namespace luxrays;
@@ -32,8 +35,20 @@ using namespace slg;
 // TracePhotonsThread
 //------------------------------------------------------------------------------
 
-TracePhotonsThread::TracePhotonsThread(PhotonGICache &cache, const u_int index) :
-	pgic(cache), threadIndex(index), renderThread(nullptr) {
+TracePhotonsThread::TracePhotonsThread(PhotonGICache &cache, const u_int index,
+		const u_int seed, const u_int photonCount,
+		const bool indirectCacheDone, const bool causticCacheDone,
+		boost::atomic<u_int> &gPhotonsCounter, boost::atomic<u_int> &gIndirectPhotonsTraced,
+		boost::atomic<u_int> &gCausticPhotonsTraced, boost::atomic<u_int> &gIndirectSize,
+		boost::atomic<u_int> &gCausticSize) :
+	pgic(cache), threadIndex(index), seedBase(seed), photonTracedCount(photonCount),
+	globalPhotonsCounter(gPhotonsCounter),
+	globalIndirectPhotonsTraced(gIndirectPhotonsTraced),
+	globalCausticPhotonsTraced(gCausticPhotonsTraced),
+	globalIndirectSize(gIndirectSize),
+	globalCausticSize(gCausticSize),
+	renderThread(nullptr),
+	indirectDone(indirectCacheDone), causticDone(causticCacheDone) {
 }
 
 TracePhotonsThread::~TracePhotonsThread() {
@@ -70,7 +85,7 @@ void TracePhotonsThread::Mutate(RandomGenerator &rndGen,
 
 	for (u_int i = 0; i < currentPathSamples.size(); ++i) {
 		const float deltaU = powf(rndGen.floatValue(), 1.f / mutationSize + 1.f);
-		
+
 		float mutateValue = currentPathSamples[i];
 		if (rndGen.floatValue() < .5f) {
 			mutateValue += deltaU;
@@ -105,10 +120,11 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 	bool usefulPath = false;
 	
 	Spectrum lightPathFlux;
-	lightPathFlux = Spectrum();
 
 	const float timeSample = samples[0];
-	const float time = camera->GenerateRayTime(timeSample);
+	const float time = (pgic.params.photon.timeStart <= pgic.params.photon.timeEnd) ?
+		Lerp(timeSample, pgic.params.photon.timeStart, pgic.params.photon.timeEnd) :
+		camera->GenerateRayTime(timeSample);
 
 	// Select one light source
 	float lightPickPdf;
@@ -120,29 +136,25 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 		float lightEmitPdfW;
 		Ray nextEventRay;
 		lightPathFlux = light->Emit(*scene,
-			samples[2], samples[3], samples[4], samples[5], samples[6],
-				&nextEventRay.o, &nextEventRay.d, &lightEmitPdfW);
-		nextEventRay.UpdateMinMaxWithEpsilon();
-		nextEventRay.time = time;
+				time, samples[2], samples[3], samples[4], samples[5], samples[6],
+				nextEventRay, lightEmitPdfW);
 
 		if (!lightPathFlux.Black()) {
 			lightPathFlux /= lightEmitPdfW * lightPickPdf;
-			assert (!lightPathFlux.IsNaN() && !lightPathFlux.IsInf());
+			assert (lightPathFlux.IsValid());
 
 			//------------------------------------------------------------------
 			// Trace the light path
 			//------------------------------------------------------------------
 
-			bool specularPath = true;
-			PathVolumeInfo volInfo;
-			PathDepthInfo depthInfo;
+			LightPathInfo pathInfo;
 			for (;;) {
-				const u_int sampleOffset = sampleBootSize +	depthInfo.depth * sampleStepSize;
+				const u_int sampleOffset = sampleBootSize +	pathInfo.depth.depth * sampleStepSize;
 
 				RayHit nextEventRayHit;
 				BSDF bsdf;
 				Spectrum connectionThroughput;
-				const bool hit = scene->Intersect(nullptr, true, false, &volInfo, samples[sampleOffset],
+				const bool hit = scene->Intersect(nullptr, LIGHT_RAY | GENERIC_RAY, &pathInfo.volume, samples[sampleOffset],
 						&nextEventRay, &nextEventRayHit, &bsdf,
 						&connectionThroughput);
 
@@ -155,43 +167,44 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 					// Deposit photons only on diffuse surfaces
 					//----------------------------------------------------------
 
-					if (pgic.IsPhotonGIEnabled(bsdf)) {
+					if (pgic.IsPhotonGIEnabled(bsdf) &&
+							// This is an anti-NaNs/Infs safety net to avoid poisoning
+							// the caches
+							lightPathFlux.IsValid()) {
 						// Flip the normal if required
 						const Normal landingSurfaceNormal = ((Dot(bsdf.hitPoint.geometryN, -nextEventRay.d) > 0.f) ?
-							1.f : -1.f) * bsdf.hitPoint.shadeN;
+							1.f : -1.f) * bsdf.hitPoint.geometryN;
 
 						// Check if the point is visible
 						allNearEntryIndices.clear();
 						pgic.visibilityParticlesKdTree->GetAllNearEntries(allNearEntryIndices,
-								bsdf.hitPoint.p, landingSurfaceNormal,
+								bsdf.hitPoint.p, landingSurfaceNormal, bsdf.IsVolume(),
 								pgic.params.visibility.lookUpRadius2,
 								pgic.params.visibility.lookUpNormalCosAngle);
 
 						if (allNearEntryIndices.size() > 0) {
-							if ((depthInfo.depth > 0) && specularPath && pgic.params.caustic.enabled) {
+							if ((pathInfo.depth.depth > 0) && pathInfo.IsSpecularPath() && !causticDone) {
 								// It is a caustic photon
-								if (!causticDone) {
-									newCausticPhotons.push_back(Photon(bsdf.hitPoint.p, nextEventRay.d,
-											lightPathFlux, landingSurfaceNormal));
-								}
+								newCausticPhotons.push_back(Photon(bsdf.hitPoint.p, nextEventRay.d,
+										light->GetID(), lightPathFlux, landingSurfaceNormal, bsdf.IsVolume()));
 
 								usefulPath = true;
 							}
 							
-							if (pgic.params.indirect.enabled) {
+							if (!indirectDone) {
 								// It is an indirect photon
-								if (!indirectDone) {
-									// Add outgoingRadiance to each near visible entry 
-									for (auto const &vpIndex : allNearEntryIndices)
-										newIndirectPhotons.push_back(RadiancePhotonEntry(vpIndex, lightPathFlux));
-								}
+
+								// Add outgoingRadiance to each near visible entry 
+								for (auto const &vpIndex : allNearEntryIndices)
+									newIndirectPhotons.push_back(RadiancePhotonEntry(vpIndex,
+											light->GetID(), lightPathFlux));
 
 								usefulPath = true;
-							} 
+							}
 						}
 					}
 
-					if (depthInfo.depth + 1 >= pgic.params.photon.maxPathDepth)
+					if (pathInfo.depth.depth + 1 >= pgic.params.photon.maxPathDepth)
 						break;
 
 					//----------------------------------------------------------
@@ -200,23 +213,24 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 
 					float bsdfPdf;
 					Vector sampledDir;
-					BSDFEvent lastBSDFEvent;
+					BSDFEvent bsdfEvent;
 					float cosSampleDir;
 					const Spectrum bsdfSample = bsdf.Sample(&sampledDir,
 							samples[sampleOffset + 2],
 							samples[sampleOffset + 3],
-							&bsdfPdf, &cosSampleDir, &lastBSDFEvent);
+							&bsdfPdf, &cosSampleDir, &bsdfEvent);
 					if (bsdfSample.Black())
 						break;
 
-					// Is it still a specular path ?
-					specularPath = specularPath && (lastBSDFEvent & SPECULAR);
+					pathInfo.AddVertex(bsdf, bsdfEvent, pgic.params.glossinessUsageThreshold);
 
-					// Increment path depth informations
-					depthInfo.IncDepths(lastBSDFEvent);
+					// If I have to fill only the caustic cache and last BSDF event
+					// is not a (nearly) specular one, I can stop with this path
+					if (indirectDone && !causticDone && !pathInfo.IsSpecularPath())
+						break;
 
 					// Russian Roulette
-					if (!(lastBSDFEvent & SPECULAR) && (depthInfo.GetRRDepth() >= rrDepth)) {
+					if (pathInfo.UseRR(rrDepth)) {
 						const float rrProb = RenderEngine::RussianRouletteProb(bsdfSample, rrImportanceCap);
 						if (rrProb < samples[sampleOffset + 4])
 							break;
@@ -226,12 +240,9 @@ bool TracePhotonsThread::TracePhotonPath(RandomGenerator &rndGen,
 					}
 					
 					lightPathFlux *= bsdfSample;
-					assert (!lightPathFlux.IsNaN() && !lightPathFlux.IsInf());
+					assert (lightPathFlux.IsValid());
 
-					// Update volume information
-					volInfo.Update(lastBSDFEvent, bsdf);
-
-					nextEventRay.Update(bsdf.hitPoint.p, sampledDir);
+					nextEventRay.Update(bsdf.GetRayOrigin(sampledDir), sampledDir);
 				} else {
 					// Ray lost in space...
 					break;
@@ -276,7 +287,10 @@ void TracePhotonsThread::RenderFunc() {
 	// Initialization
 	//--------------------------------------------------------------------------
 
-	RandomGenerator rndGen(1 + threadIndex);
+	// This is really used only by Windows for 64+ threads support
+	SetThreadGroupAffinity(threadIndex);
+	
+	RandomGenerator rndGen(seedBase + threadIndex);
 
 	sampleBootSize = 7;
 	sampleStepSize = 5;
@@ -303,42 +317,50 @@ void TracePhotonsThread::RenderFunc() {
 
 	const double startTime = WallClockTime();
 	double lastPrintTime = startTime;
+	bool foundUsefulFirstPrint = true;
 	while(!boost::this_thread::interruption_requested()) {
 		// Get some work to do
 		u_int workCounter;
 		do {
-			workCounter = pgic.globalPhotonsCounter;
-		} while (!pgic.globalPhotonsCounter.compare_exchange_weak(workCounter, workCounter + workSize));
+			workCounter = globalPhotonsCounter;
+		} while (!globalPhotonsCounter.compare_exchange_weak(workCounter, workCounter + workSize));
 
 		// Check if it is time to stop
-		if (workCounter >= pgic.params.photon.maxTracedCount)
+		if (workCounter >= photonTracedCount)
 			break;
 
-		indirectDone = (pgic.globalIndirectSize >= pgic.params.indirect.maxSize);
-		causticDone = (pgic.globalCausticSize >= pgic.params.caustic.maxSize);
+		indirectDone = indirectDone || (!pgic.params.indirect.enabled) ||
+				((pgic.params.indirect.maxSize > 0) && (globalIndirectSize >= pgic.params.indirect.maxSize));
+		causticDone = causticDone || (!pgic.params.caustic.enabled) ||
+				(globalCausticSize >= pgic.params.caustic.maxSize);
 
-		u_int workToDo = (workCounter + workSize > pgic.params.photon.maxTracedCount) ?
-			(pgic.params.photon.maxTracedCount - workCounter) : workSize;
+		// Check if it is time to stop
+		if (indirectDone && causticDone)
+			break;
+
+		u_int workToDo = (workCounter + workSize > photonTracedCount) ?
+			(photonTracedCount - workCounter) : workSize;
 
 		if (!indirectDone)
-			pgic.globalIndirectPhotonsTraced += workToDo;
+			globalIndirectPhotonsTraced += workToDo;
 		if (!causticDone)
-			pgic.globalCausticPhotonsTraced += workToDo;
+			globalCausticPhotonsTraced += workToDo;
 
 		// Print some progress information
 		if (threadIndex == 0) {
 			const double now = WallClockTime();
 			if (now - lastPrintTime > 2.0) {
-				const float indirectProgress = pgic.params.indirect.enabled ?
-					((pgic.globalIndirectSize > 0) ? ((100.0 * pgic.globalIndirectSize) / pgic.params.indirect.maxSize) : 0.f) :
+				const float indirectProgress = !indirectDone ?
+					(((globalIndirectSize > 0) && (pgic.params.indirect.maxSize > 0)) ?
+						((100.0 * globalIndirectSize) / pgic.params.indirect.maxSize) : 0.f) :
 					100.f;
-				const float causticProgress = pgic.params.caustic.enabled ?
-					((pgic.globalCausticSize > 0) ? ((100.0 * pgic.globalCausticSize) / pgic.params.caustic.maxSize) : 0.f) :
+				const float causticProgress = !causticDone ?
+					((globalCausticSize > 0) ? ((100.0 * globalCausticSize) / pgic.params.caustic.maxSize) : 0.f) :
 					100.f;
 
 				SLG_LOG(boost::format("PhotonGI Cache photon traced: %d/%d [%.1f%%, %.1fM photons/sec, Map sizes (%.1f%%, %.1f%%)]") %
-						workCounter % pgic.params.photon.maxTracedCount %
-						((100.0 * workCounter) / pgic.params.photon.maxTracedCount) %
+						workCounter % photonTracedCount %
+						((100.0 * workCounter) / photonTracedCount) %
 						(workCounter / (1000.0 * (now - startTime))) %
 						indirectProgress %
 						causticProgress);
@@ -374,7 +396,10 @@ void TracePhotonsThread::RenderFunc() {
 			if (!foundUseful) {
 				// I was unable to find a useful path. Something wrong. this
 				// may be an empty scene, a dark room, etc.
-				SLG_LOG("PhotonGI metropolis sampler is unable to find a useful light path");
+				if (foundUsefulFirstPrint) {
+					SLG_LOG("PhotonGI metropolis sampler is unable to find a useful light path");
+					foundUsefulFirstPrint = false;
+				}
 			} else {
 				// Trace light paths
 
@@ -475,12 +500,7 @@ void TracePhotonsThread::RenderFunc() {
 		//----------------------------------------------------------------------
 		
 		// Update size counters
-		pgic.globalIndirectSize += indirectPhotons.size() - indirectPhotonsStart;
-		pgic.globalCausticSize += causticPhotons.size() - causticPhotonsStart;
-
-		// Check if it is time to stop. I can do the check only here because
-		// globalPhotonsTraced was already incremented
-		if (indirectDone && causticDone)
-			break;
+		globalIndirectSize += indirectPhotons.size() - indirectPhotonsStart;
+		globalCausticSize += causticPhotons.size() - causticPhotonsStart;
 	}
 }

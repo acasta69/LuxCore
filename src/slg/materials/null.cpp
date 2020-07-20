@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -26,6 +26,10 @@ using namespace slg;
 // Null material
 //------------------------------------------------------------------------------
 
+NullMaterial::NullMaterial(const Texture *frontTransp, const Texture *backTransp) :
+		Material(frontTransp, backTransp, NULL, NULL) {
+}
+
 Spectrum NullMaterial::Albedo(const HitPoint &hitPoint) const {
 	return Spectrum();
 }
@@ -39,17 +43,23 @@ Spectrum NullMaterial::Evaluate(const HitPoint &hitPoint,
 Spectrum NullMaterial::Sample(const HitPoint &hitPoint,
 	const Vector &localFixedDir, Vector *localSampledDir,
 	const float u0, const float u1, const float passThroughEvent,
-	float *pdfW, float *absCosSampledDir, BSDFEvent *event) const {
+	float *pdfW, BSDFEvent *event, const BSDFEvent eventHint) const {
 	*localSampledDir = -localFixedDir;
-	*absCosSampledDir = fabsf(CosTheta(*localSampledDir));
 
 	*pdfW = 1.f;
 	*event = SPECULAR | TRANSMIT;
 	return Spectrum(1.f);
 }
 
+void NullMaterial::UpdateAvgPassThroughTransparency() {
+	avgPassThroughTransparency = 1.f;
+}
+
 Spectrum NullMaterial::GetPassThroughTransparency(const HitPoint &hitPoint,
-		const luxrays::Vector &localFixedDir, const float passThroughEvent) const {
+		const luxrays::Vector &localFixedDir, const float passThroughEvent,
+		const bool backTracing) const {
+	const Texture *transparencyTex = (hitPoint.intoObject != backTracing) ? frontTransparencyTex : backTransparencyTex;
+
 	if (transparencyTex) {
 		const Spectrum blendColor = transparencyTex->GetSpectrumValue(hitPoint).Clamp(0.f, 1.f);
 		if (blendColor.Black()) {

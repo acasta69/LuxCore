@@ -1,7 +1,7 @@
 #line 2 "imagemap_types.cl"
 
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -31,9 +31,29 @@ typedef enum {
 
 typedef struct {
 	ImageMapStorageType storageType;
-	unsigned int channelCount, width, height;
-	unsigned int pageIndex, pixelsIndex;
 	ImageWrapType wrapType;
+	unsigned int channelCount, width, height;
+	unsigned int pageIndex;
+	// The following field must be 64bit aligned (for OpenCL)
+#if defined(SLG_OPENCL_KERNEL)
+	// CUDA unsigned long has a 32bit size so we need different definitions
+	// between CUDA and OpenCL
+#if defined(LUXRAYS_CUDA_DEVICE)
+	unsigned long long pixelsIndex;
+#elif defined(LUXRAYS_OPENCL_DEVICE)
+	unsigned long pixelsIndex;
+#else
+#error "Unsupported device in ImageMap struct"
+#endif
+#else
+#if defined(LUXRAYS_ENABLE_OPENCL)
+	cl_ulong pixelsIndex;
+#else
+	// In this, case cl_ulong is not defined. The type, in this case, doesn't
+	// really matter because this structure is not used at all.
+	unsigned long long pixelsIndex;
+#endif
+#endif
 } ImageMap;
 
 //------------------------------------------------------------------------------
@@ -42,16 +62,7 @@ typedef struct {
 
 #if defined(SLG_OPENCL_KERNEL)
 
-#if defined(PARAM_HAS_IMAGEMAPS)
-
 #define IMAGEMAPS_PARAM_DECL , __global const ImageMap* restrict imageMapDescs, __global const float* restrict* restrict imageMapBuff
 #define IMAGEMAPS_PARAM , imageMapDescs, imageMapBuff
-
-#else
-
-#define IMAGEMAPS_PARAM_DECL
-#define IMAGEMAPS_PARAM
-
-#endif
 
 #endif

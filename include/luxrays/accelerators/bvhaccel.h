@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -28,6 +28,8 @@
 
 namespace luxrays {
 
+class HardwareIntersectionDevice;
+
 // BVHAccel Declarations
 class BVHAccel : public Accelerator {
 public:
@@ -36,8 +38,10 @@ public:
 	virtual ~BVHAccel();
 
 	virtual AcceleratorType GetType() const { return ACCEL_BVH; }
-	virtual OpenCLKernels *NewOpenCLKernels(OpenCLIntersectionDevice *device,
-		const u_int kernelCount) const;
+
+	virtual bool HasDataParallelSupport(const IntersectionDevice &device) const;
+	virtual HardwareIntersectionKernel *NewHardwareIntersectionKernel(HardwareIntersectionDevice &device) const;
+
 	virtual void Init(const std::deque<const Mesh *> &meshes,
 		const u_longlong totalVertexCount,
 		const u_longlong totalTriangleCount);
@@ -46,11 +50,9 @@ public:
 
 	static BVHParams ToBVHParams(const Properties &props);
 
+	friend class BVHKernel;
+	friend class MBVHKernel;
 	friend class MBVHAccel;
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-	friend class OpenCLBVHKernels;
-	friend class OpenCLMBVHKernels;
-#endif
 
 private:
 	BVHParams params;

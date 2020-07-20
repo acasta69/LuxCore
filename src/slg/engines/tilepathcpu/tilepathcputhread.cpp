@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -16,8 +16,11 @@
  * limitations under the License.                                          *
  ***************************************************************************/
 
+#include "luxrays/utils/thread.h"
+
 #include "slg/samplers/tilepathsampler.h"
 #include "slg/engines/tilepathcpu/tilepathcpu.h"
+#include "slg/engines/caches/photongi/photongicache.h"
 
 using namespace std;
 using namespace luxrays;
@@ -51,21 +54,24 @@ void TilePathCPURenderThread::RenderFunc() {
 	// Initialization
 	//--------------------------------------------------------------------------
 
+	// This is really used only by Windows for 64+ threads support
+	SetThreadGroupAffinity(threadIndex);
+
 	TilePathCPURenderEngine *engine = (TilePathCPURenderEngine *)renderEngine;
 	const PathTracer &pathTracer = engine->pathTracer;
 	RandomGenerator *rndGen = new RandomGenerator(engine->seedBase + threadIndex);
 
 	// Setup the sampler
 	Sampler *genericSampler = engine->renderConfig->AllocSampler(rndGen,
-			engine->film, NULL, NULL);
-	genericSampler->RequestSamples(pathTracer.sampleSize);
+			engine->film, NULL, NULL, Properties());
+	genericSampler->RequestSamples(PIXEL_NORMALIZED_ONLY, pathTracer.eyeSampleSize);
 
 	TilePathSampler *sampler = dynamic_cast<TilePathSampler *>(genericSampler);
 	sampler->SetAASamples(engine->aaSamples);
 
 	// Initialize SampleResult
 	vector<SampleResult> sampleResults(1);
-	pathTracer.InitSampleResults(engine->film, sampleResults);
+	PathTracer::InitEyeSampleResults(engine->film, sampleResults);
 
 	//--------------------------------------------------------------------------
 	// Extract the tile to render
@@ -101,7 +107,8 @@ void TilePathCPURenderThread::RenderFunc() {
 			for (u_int x = 0; x < tileWork.GetCoord().width && !interruptionRequested; ++x) {
 				for (u_int sampleY = 0; sampleY < engine->aaSamples; ++sampleY) {
 					for (u_int sampleX = 0; sampleX < engine->aaSamples; ++sampleX) {
-						pathTracer.RenderSample(device, engine->renderConfig->scene, engine->film, sampler, sampleResults);
+						pathTracer.RenderEyeSample(device, engine->renderConfig->scene,
+								engine->film, sampler, sampleResults);
 
 						sampler->NextSample(sampleResults);
 					}
@@ -114,11 +121,27 @@ void TilePathCPURenderThread::RenderFunc() {
 #endif
 			}
 		}
+		
+		if (engine->photonGICache) {
+			try {
+				const u_int spp = engine->film->GetTotalEyeSampleCount() / engine->film->GetPixelCount();
+				engine->photonGICache->Update(threadIndex, spp);
+			} catch (boost::thread_interrupted &ti) {
+				// I have been interrupted, I must stop
+				break;
+			}
+		}
 	}
 
 	delete rndGen;
 
 	threadDone = true;
+
+	// This is done to interrupt thread pending on barrier wait
+	// inside engine->photonGICache->Update(). This can happen when an
+	// halt condition is satisfied.
+	for (u_int i = 0; i < engine->renderThreads.size(); ++i)
+		engine->renderThreads[i]->Interrupt();
 
 	//SLG_LOG("[TilePathCPURenderEngine::" << threadIndex << "] Rendering thread halted");
 }

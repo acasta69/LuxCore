@@ -1,7 +1,7 @@
 #line 2 "materialdefs_funcs_cloth.cl"
 
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -21,12 +21,6 @@
 //------------------------------------------------------------------------------
 // Cloth material
 //------------------------------------------------------------------------------
-
-#if defined (PARAM_ENABLE_MAT_CLOTH)
-
-OPENCL_FORCE_INLINE BSDFEvent ClothMaterial_GetEventTypes() {
-	return GLOSSY | REFLECT;
-}
 
 __constant WeaveConfig ClothWeaves[] = {
     // DenimWeave
@@ -65,7 +59,7 @@ __constant WeaveConfig ClothWeaves[] = {
         0.0f, 0.0f, 0.0f, 0.0f,
         0.0f
     },
-    // WoolGarbardineWeave
+    // WoolGabardineWeave
     {
         6, 9,
         0.01f, 4.0f,
@@ -135,7 +129,7 @@ __constant Yarn ClothYarns[][14] = {
         {-30, 36, 0, 2, 1, 0.625,  0.375, WEFT},
         {-30, 36, 0, 2, 1, 0.875,  0.125, WEFT}
     },
-    // WoolGarbardineYarn[7]
+    // WoolGabardineYarn[7]
     {
         {30, 30, 0, 2, 6, 0.167, 0.667, WARP},
         {30, 30, 0, 2, 6, 0.500, 1.000, WARP},
@@ -174,7 +168,7 @@ __constant int ClothPatterns[][6 * 9] = {
         7, 2, 4, 6,  7, 2, 4, 6,  1, 8, 4,  6,  1, 8, 4,  6,
         1, 3, 9, 6,  1, 3, 9, 6,  1, 3, 5, 10,  1, 3, 5, 10
     },
-    // WoolGarbardinePattern[6 * 9]
+    // WoolGabardinePattern[6 * 9]
     {
         1, 1, 2, 2, 7, 7,  1, 1, 2, 2, 7, 7,  1, 1, 2, 2, 7, 7,
         1, 1, 6, 6, 4, 4,  1, 1, 6, 6, 4, 4,  1, 1, 6, 6, 4, 4,
@@ -274,11 +268,11 @@ OPENCL_FORCE_INLINE void GetYarnUV(__constant WeaveConfig *Weave, __constant Yar
 	// See Chapter 6.
 	// Rotate pi/2 radians around z axis
 	if (yarn->yarn_type == WARP) {
-		(*uv).s0 = xy.y * 2.f * *umaxMod / yarn->length;
-		(*uv).s1 = xy.x * M_PI_F / yarn->width;
+		(*uv).x = xy.y * 2.f * *umaxMod / yarn->length;
+		(*uv).y = xy.x * M_PI_F / yarn->width;
 	} else {
-		(*uv).s0 = xy.x * 2.f * *umaxMod / yarn->length;
-		(*uv).s1 = -xy.y * M_PI_F / yarn->width;
+		(*uv).x = xy.x * 2.f * *umaxMod / yarn->length;
+		(*uv).y = -xy.y * M_PI_F / yarn->width;
 	}
 }
 
@@ -299,9 +293,9 @@ OPENCL_FORCE_INLINE __constant Yarn *GetYarn(const ClothPreset Preset, __constan
 	const int yarnID = ClothPatterns[Preset][lx + Weave->tileWidth * ly] - 1;
 	__constant Yarn *yarn = &ClothYarns[Preset][yarnID];
 
-	const float3 center = (float3)((bu + yarn->centerU) * Weave->tileWidth,
+	const float3 center = MAKE_FLOAT3((bu + yarn->centerU) * Weave->tileWidth,
 		(bv + yarn->centerV) * Weave->tileHeight, 0.f);
-	const float3 xy = (float3)((ou - yarn->centerU) * Weave->tileWidth,
+	const float3 xy = MAKE_FLOAT3((ou - yarn->centerU) * Weave->tileWidth,
 		(ov - yarn->centerV) * Weave->tileHeight, 0.f);
 
 	GetYarnUV(Weave, yarn, Repeat_U, Repeat_V, center, xy, uv, umax);
@@ -390,9 +384,9 @@ OPENCL_FORCE_INLINE float EvalFilamentIntegrand(__constant WeaveConfig *Weave, _
 	
 	// n is normal to the yarn surface
 	// t is tangent of the fibers.
-	const float3 n = normalize((float3)(sin(v), sin(u_of_v) * cos(v),
+	const float3 n = normalize(MAKE_FLOAT3(sin(v), sin(u_of_v) * cos(v),
 		cos(u_of_v) * cos(v)));
-	const float3 t = normalize((float3)(0.0f, cos(u_of_v), -sin(u_of_v)));
+	const float3 t = normalize(MAKE_FLOAT3(0.0f, cos(u_of_v), -sin(u_of_v)));
 
 	// R is radius of curvature.
 	const float R = RadiusOfCurvature(yarn, fmin(fabs(u_of_v),
@@ -453,7 +447,7 @@ OPENCL_FORCE_INLINE float EvalStapleIntegrand(__constant WeaveConfig *Weave, __c
 		return 0.f;
 
 	// n is normal to the yarn surface.
-	const float3 n = normalize((float3)(sin(v_of_u), sin(u) * cos(v_of_u),
+	const float3 n = normalize(MAKE_FLOAT3(sin(v_of_u), sin(u) * cos(v_of_u),
 		cos(u) * cos(v_of_u)));
 
 	// R is radius of curvature.
@@ -482,11 +476,11 @@ OPENCL_FORCE_INLINE float EvalIntegrand(__constant WeaveConfig *Weave, __constan
         const float2 uv, float umaxMod, float3 *om_i, float3 *om_r) {
 	if (yarn->yarn_type == WARP) {
 		if (yarn->psi != 0.0f)
-			return EvalStapleIntegrand(Weave, yarn, *om_i, *om_r, uv.s0, uv.s1,
+			return EvalStapleIntegrand(Weave, yarn, *om_i, *om_r, uv.x, uv.y,
 				umaxMod) * (Weave->warpArea + Weave->weftArea) /
 				Weave->warpArea;
 		else
-			return EvalFilamentIntegrand(Weave, yarn, *om_i, *om_r, uv.s0, uv.s1,
+			return EvalFilamentIntegrand(Weave, yarn, *om_i, *om_r, uv.x, uv.y,
 				umaxMod) * (Weave->warpArea + Weave->weftArea) /
 				Weave->warpArea;
 	} else {
@@ -504,11 +498,11 @@ OPENCL_FORCE_INLINE float EvalIntegrand(__constant WeaveConfig *Weave, __constan
 		(*om_r).x = -(*om_r).x;
 
 		if (yarn->psi != 0.0f)
-			return EvalStapleIntegrand(Weave, yarn, *om_i, *om_r, uv.s0, uv.s1,
+			return EvalStapleIntegrand(Weave, yarn, *om_i, *om_r, uv.x, uv.y,
 				umaxMod) * (Weave->warpArea + Weave->weftArea) /
 				Weave->weftArea;
 		else
-			return EvalFilamentIntegrand(Weave, yarn, *om_i, *om_r, uv.s0, uv.s1,
+			return EvalFilamentIntegrand(Weave, yarn, *om_i, *om_r, uv.x, uv.y,
 				umaxMod) * (Weave->warpArea + Weave->weftArea) /
 				Weave->weftArea;
 	}
@@ -528,91 +522,189 @@ OPENCL_FORCE_INLINE float EvalSpecular(__constant WeaveConfig *Weave, __constant
 	return EvalIntegrand(Weave, yarn, uv, umax, &om_i, &om_r);
 }
 
-OPENCL_FORCE_INLINE float3 ClothMaterial_Albedo(const float u, const float v,
-		const ClothPreset Preset, const float Repeat_U, const float Repeat_V,
-		const float s, const float3 Warp_Kd, const float3 Weft_Kd) {
-	__constant WeaveConfig *Weave = &ClothWeaves[Preset];
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_INLINE void ClothMaterial_Albedo(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	__constant WeaveConfig *Weave = &ClothWeaves[material->cloth.Preset];
 
 	float2 uv;
-	float umax, scale = s;
-	__constant Yarn *yarn = GetYarn(Preset, Weave, Repeat_U, Repeat_V,
-            u, v, &uv, &umax, &scale);
+	float umax, scale = material->cloth.specularNormalization;
+	__constant Yarn *yarn = GetYarn(material->cloth.Preset, Weave,
+			material->cloth.Repeat_U, material->cloth.Repeat_V,
+            hitPoint->defaultUV.u, hitPoint->defaultUV.v, &uv, &umax, &scale);
 	
-	const float3 kd = (yarn->yarn_type == WARP) ? Warp_Kd : Weft_Kd;
+	const float3 kd = (yarn->yarn_type == WARP) ?
+		Texture_GetSpectrumValue(material->cloth.Warp_KdIndex, hitPoint TEXTURES_PARAM) :
+		Texture_GetSpectrumValue(material->cloth.Weft_KdIndex, hitPoint TEXTURES_PARAM);
 
-    const float3 kdVal = Spectrum_Clamp(kd);
+    const float3 albedo = Spectrum_Clamp(kd);
 
-	return Spectrum_Clamp(kdVal);
+	EvalStack_PushFloat3(albedo);
 }
 
-OPENCL_FORCE_NOT_INLINE float3 ClothMaterial_Evaluate(
-		__global HitPoint *hitPoint, const float3 localLightDir, const float3 localEyeDir,
-		BSDFEvent *event, float *directPdfW,
-		const ClothPreset Preset, const float Repeat_U, const float Repeat_V,
-		const float s, const float3 Warp_Ks, const float3 Weft_Ks,
-		const float3 Warp_Kd, const float3 Weft_Kd) {
-    *directPdfW = fabs(localLightDir.z * M_1_PI_F);
-    
-    *event = GLOSSY | REFLECT;
+OPENCL_FORCE_INLINE void ClothMaterial_GetInteriorVolume(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	DefaultMaterial_GetInteriorVolume(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+}
 
+OPENCL_FORCE_INLINE void ClothMaterial_GetExteriorVolume(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	DefaultMaterial_GetExteriorVolume(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+}
+
+OPENCL_FORCE_INLINE void ClothMaterial_GetPassThroughTransparency(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	DefaultMaterial_GetPassThroughTransparency(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+}
+
+OPENCL_FORCE_INLINE void ClothMaterial_GetEmittedRadiance(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	DefaultMaterial_GetEmittedRadiance(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+}
+
+OPENCL_FORCE_INLINE void ClothMaterial_Evaluate(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float3 lightDir, eyeDir;
+	EvalStack_PopFloat3(eyeDir);
+	EvalStack_PopFloat3(lightDir);
+
+    const float directPdfW = fabs(lightDir.z * M_1_PI_F);
+    
+    const BSDFEvent event = GLOSSY | REFLECT;
+
+	const ClothPreset Preset = material->cloth.Preset;
     __constant WeaveConfig *Weave = &ClothWeaves[Preset];
 
 	float2 uv;
-	float umax, scale = s;
+	float umax, scale = material->cloth.specularNormalization;
+	const float Repeat_U = material->cloth.Repeat_U;
+	const float Repeat_V = material->cloth.Repeat_V;
 	__constant Yarn *yarn = GetYarn(Preset, Weave, Repeat_U, Repeat_V,
-            hitPoint->uv.u, hitPoint->uv.v, &uv, &umax, &scale);
+            hitPoint->defaultUV.u, hitPoint->defaultUV.v, &uv, &umax, &scale);
     
-    scale = scale * EvalSpecular(Weave, yarn, uv, umax, localLightDir, localEyeDir);
+    scale = scale * EvalSpecular(Weave, yarn, uv, umax, lightDir, eyeDir);
 	
-	const float3 ks = (yarn->yarn_type == WARP) ? Warp_Ks : Weft_Ks;
-	const float3 kd = (yarn->yarn_type == WARP) ? Warp_Kd : Weft_Kd;
+	const float3 ks = (yarn->yarn_type == WARP) ?
+		Texture_GetSpectrumValue(material->cloth.Warp_KsIndex, hitPoint TEXTURES_PARAM) :
+		Texture_GetSpectrumValue(material->cloth.Weft_KsIndex, hitPoint TEXTURES_PARAM);
+	const float3 kd = (yarn->yarn_type == WARP) ?
+		Texture_GetSpectrumValue(material->cloth.Warp_KdIndex, hitPoint TEXTURES_PARAM) :
+		Texture_GetSpectrumValue(material->cloth.Weft_KdIndex, hitPoint TEXTURES_PARAM);
 
     const float3 ksVal = Spectrum_Clamp(ks);
     const float3 kdVal = Spectrum_Clamp(kd);
 
-	return (kdVal + ksVal * scale) * M_1_PI_F * fabs(localLightDir.z);
+	const float3 result = (kdVal + ksVal * scale) * M_1_PI_F * fabs(lightDir.z);
+
+	EvalStack_PushFloat3(result);
+	EvalStack_PushBSDFEvent(event);
+	EvalStack_PushFloat(directPdfW);
 }
 
-OPENCL_FORCE_NOT_INLINE float3 ClothMaterial_Sample(
-		__global HitPoint *hitPoint, const float3 localFixedDir, float3 *localSampledDir,
-		const float u0, const float u1,
-#if defined(PARAM_HAS_PASSTHROUGH)
-		const float passThroughEvent,
-#endif
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event,
-		const ClothPreset Preset, const float Repeat_U, const float Repeat_V,
-		const float s, const float3 Warp_Ks, const float3 Weft_Ks,
-		const float3 Warp_Kd, const float3 Weft_Kd) {
-	if (fabs(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
-		return BLACK;
+OPENCL_FORCE_INLINE void ClothMaterial_Sample(__global const Material* restrict material,
+		__global const HitPoint *hitPoint,
+		__global float *evalStack, uint *evalStackOffset
+		MATERIALS_PARAM_DECL) {
+	float u0, u1, passThroughEvent;
+	EvalStack_PopFloat(passThroughEvent);
+	EvalStack_PopFloat(u1);
+	EvalStack_PopFloat(u0);
+	float3 fixedDir;
+	EvalStack_PopFloat3(fixedDir);
 
-	*localSampledDir = (signbit(localFixedDir.z) ? -1.f : 1.f) * CosineSampleHemisphereWithPdf(u0, u1, pdfW);
+	if (fabs(fixedDir.z) < DEFAULT_COS_EPSILON_STATIC) {
+		MATERIAL_SAMPLE_RETURN_BLACK;
+	}
 
-	*absCosSampledDir = fabs((*localSampledDir).z);
-	if (*absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
-		return BLACK;
+	float pdfW;
+	const float3 sampledDir = (signbit(fixedDir.z) ? -1.f : 1.f) * CosineSampleHemisphereWithPdf(u0, u1, &pdfW);
+	if (fabs(CosTheta(sampledDir)) < DEFAULT_COS_EPSILON_STATIC) {
+		MATERIAL_SAMPLE_RETURN_BLACK;
+	}
 
-	*event = GLOSSY | REFLECT;
+	const BSDFEvent event = GLOSSY | REFLECT;
 
+	const ClothPreset Preset = material->cloth.Preset;
     __constant WeaveConfig *Weave = &ClothWeaves[Preset];
 
 	float2 uv;
-	float umax, scale = s;
+	float umax, scale = material->cloth.specularNormalization;
+	const float Repeat_U = material->cloth.Repeat_U;
+	const float Repeat_V = material->cloth.Repeat_V;
 	__constant Yarn *yarn = GetYarn(Preset, Weave, Repeat_U, Repeat_V,
-            hitPoint->uv.u, hitPoint->uv.v, &uv, &umax, &scale);
+            hitPoint->defaultUV.u, hitPoint->defaultUV.v, &uv, &umax, &scale);
 
 //	if (!hitPoint.fromLight)
-	    scale = scale * EvalSpecular(Weave, yarn, uv, umax, localFixedDir, *localSampledDir);
+	    scale = scale * EvalSpecular(Weave, yarn, uv, umax, fixedDir, sampledDir);
 //	else
-//	    scale = scale * EvalSpecular(Weave, yarn, uv, umax, *localSampledDir, localFixedDir);
+//	    scale = scale * EvalSpecular(Weave, yarn, uv, umax, sampledDir, fixedDir);
 
-    const float3 ks = (yarn->yarn_type == WARP) ? Warp_Ks : Weft_Ks;
-	const float3 kd = (yarn->yarn_type == WARP) ? Warp_Kd : Weft_Kd;
+	const float3 ks = (yarn->yarn_type == WARP) ?
+		Texture_GetSpectrumValue(material->cloth.Warp_KsIndex, hitPoint TEXTURES_PARAM) :
+		Texture_GetSpectrumValue(material->cloth.Weft_KsIndex, hitPoint TEXTURES_PARAM);
+	const float3 kd = (yarn->yarn_type == WARP) ?
+		Texture_GetSpectrumValue(material->cloth.Warp_KdIndex, hitPoint TEXTURES_PARAM) :
+		Texture_GetSpectrumValue(material->cloth.Weft_KdIndex, hitPoint TEXTURES_PARAM);
 
     const float3 ksVal = Spectrum_Clamp(ks);
     const float3 kdVal = Spectrum_Clamp(kd);
 
-	return kdVal + ksVal * scale;
+	const float3 result = kdVal + ksVal * scale;
+
+	EvalStack_PushFloat3(result);
+	EvalStack_PushFloat3(sampledDir);
+	EvalStack_PushFloat(pdfW);
+	EvalStack_PushBSDFEvent(event);
 }
 
-#endif
+//------------------------------------------------------------------------------
+// Material specific EvalOp
+//------------------------------------------------------------------------------
+
+OPENCL_FORCE_NOT_INLINE void ClothMaterial_EvalOp(
+		__global const Material* restrict material,
+		const MaterialEvalOpType evalType,
+		__global float *evalStack,
+		uint *evalStackOffset,
+		__global const HitPoint *hitPoint
+		MATERIALS_PARAM_DECL) {
+	switch (evalType) {
+		case EVAL_ALBEDO:
+			ClothMaterial_Albedo(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_GET_INTERIOR_VOLUME:
+			ClothMaterial_GetInteriorVolume(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_GET_EXTERIOR_VOLUME:
+			ClothMaterial_GetExteriorVolume(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_GET_EMITTED_RADIANCE:
+			ClothMaterial_GetEmittedRadiance(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_GET_PASS_TROUGH_TRANSPARENCY:
+			ClothMaterial_GetPassThroughTransparency(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_EVALUATE:
+			ClothMaterial_Evaluate(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		case EVAL_SAMPLE:
+			ClothMaterial_Sample(material, hitPoint, evalStack, evalStackOffset MATERIALS_PARAM);
+			break;
+		default:
+			// Something wrong here
+			break;
+	}
+}

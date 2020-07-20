@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -29,13 +29,12 @@ namespace slg {
 
 class GlassMaterial : public Material {
 public:
-	GlassMaterial(const Texture *transp, const Texture *emitted, const Texture *bump,
+	GlassMaterial(const Texture *frontTransp, const Texture *backTransp,
+			const Texture *emitted, const Texture *bump,
 			const Texture *refl, const Texture *trans,
 			const Texture *exteriorIorFact, const Texture *interiorIorFact,
-			const Texture *C) :
-			Material(transp, emitted, bump),
-			Kr(refl), Kt(trans), exteriorIor(exteriorIorFact), interiorIor(interiorIorFact),
-			cauchyC(C) { }
+			const Texture *C, 
+			const Texture *filmThickness, const Texture *filmIor);
 
 	virtual MaterialType GetType() const { return GLASS; }
 	virtual BSDFEvent GetEventTypes() const { return SPECULAR | REFLECT | TRANSMIT; };
@@ -48,7 +47,7 @@ public:
 	virtual luxrays::Spectrum Sample(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const;
+		float *pdfW, BSDFEvent *event, const BSDFEvent eventHint = NONE) const;
 	virtual void Pdf(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const;
@@ -63,11 +62,14 @@ public:
 	const Texture *GetExteriorIOR() const { return exteriorIor; }
 	const Texture *GetInteriorIOR() const { return interiorIor; }
 	const Texture *GetCauchyC() const { return cauchyC; }
+	const Texture *GetFilmThickness() const { return filmThickness; }
+	const Texture *GetFilmIOR() const { return filmIor; }
 
 	static luxrays::Spectrum EvalSpecularReflection(const HitPoint &hitPoint,
 			const luxrays::Vector &localFixedDir,
 			const luxrays::Spectrum &kr, const float nc, const float nt,
-			luxrays::Vector *localSampledDir);
+			luxrays::Vector *localSampledDir,
+			const float localFilmThickness, const float localFilmIor);
 	static luxrays::Spectrum EvalSpecularTransmission(const HitPoint &hitPoint,
 			const luxrays::Vector &localFixedDir, const float u0,
 			const luxrays::Spectrum &kt,
@@ -81,6 +83,8 @@ private:
 	const Texture *exteriorIor;
 	const Texture *interiorIor;
 	const Texture *cauchyC;
+	const Texture *filmThickness;
+	const Texture *filmIor;
 };
 
 }

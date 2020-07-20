@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -47,7 +47,7 @@ void TilePathCPURenderEngine::InitFilm() {
 }
 
 RenderState *TilePathCPURenderEngine::GetRenderState() {
-	return new TilePathCPURenderState(bootStrapSeed, tileRepository);
+	return new TilePathCPURenderState(bootStrapSeed, tileRepository, photonGICache);
 }
 
 void TilePathCPURenderEngine::StartLockLess() {
@@ -61,28 +61,14 @@ void TilePathCPURenderEngine::StartLockLess() {
 	CheckSamplersForTile(RenderEngineType2String(GetType()), cfg);
 
 	//--------------------------------------------------------------------------
-	// Allocate PhotonGICache if enabled
-	//--------------------------------------------------------------------------
-
-	if (GetType() != RTPATHCPU) {
-		delete photonGICache;
-		photonGICache = PhotonGICache::FromProperties(renderConfig->scene, cfg);
-
-		// photonGICache will be nullptr if the cache is disabled
-		if (photonGICache)
-			photonGICache->Preprocess();
-	}
-
-	//--------------------------------------------------------------------------
-	// Initialize the PathTracer class with rendering parameters
+	// Initialize rendering parameters
 	//--------------------------------------------------------------------------
 
 	aaSamples = Max(1, cfg.Get(GetDefaultProps().Get("tilepath.sampling.aa.size")).Get<int>());
 
+	// pathTracer must be configured here because it is then used
+	// to set tileRepository->varianceClamping, etc.
 	pathTracer.ParseOptions(cfg, GetDefaultProps());
-
-	pathTracer.InitPixelFilterDistribution(pixelFilter);
-	pathTracer.SetPhotonGICache(photonGICache);
 
 	//--------------------------------------------------------------------------
 	// Restore render state if there is one
@@ -99,7 +85,13 @@ void TilePathCPURenderEngine::StartLockLess() {
 		SLG_LOG("Continuing the rendering with new TILEPATHCPU seed: " + ToString(newSeed));
 		SetSeed(newSeed);
 
+		// Transfer the ownership of TileRepository pointer
 		tileRepository = rs->tileRepository;
+		rs->tileRepository = nullptr;
+
+		// Transfer the ownership of PhotonGI cache pointer
+		photonGICache = rs->photonGICache;
+		rs->photonGICache = nullptr;
 		
 		delete startRenderState;
 		startRenderState = NULL;
@@ -110,6 +102,26 @@ void TilePathCPURenderEngine::StartLockLess() {
 		tileRepository->varianceClamping = VarianceClamping(pathTracer.sqrtVarianceClampMaxValue);
 		tileRepository->InitTiles(*film);
 	}
+
+	//--------------------------------------------------------------------------
+	// Allocate PhotonGICache if enabled
+	//--------------------------------------------------------------------------
+
+	// note: photonGICache could have been restored from the render state
+	if ((GetType() != RTPATHCPU) && !photonGICache) {
+		photonGICache = PhotonGICache::FromProperties(renderConfig->scene, cfg);
+
+		// photonGICache will be nullptr if the cache is disabled
+		if (photonGICache)
+			photonGICache->Preprocess(renderThreads.size());
+	}
+
+	//--------------------------------------------------------------------------
+	// Initialize the PathTracer class with rendering parameters
+	//--------------------------------------------------------------------------
+
+	pathTracer.InitPixelFilterDistribution(pixelFilter);
+	pathTracer.SetPhotonGICache(photonGICache);
 
 	//--------------------------------------------------------------------------
 

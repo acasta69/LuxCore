@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -41,36 +41,35 @@ public:
 	RandomSamplerSharedData(Film *engineFilm);
 	virtual ~RandomSamplerSharedData() { }
 
-	u_int GetNewPixelIndex();
+	virtual void Reset();
+
+	void GetNewBucket(const u_int bucketCount, u_int *newBucketIndex);
 	
 	static SamplerSharedData *FromProperties(const luxrays::Properties &cfg,
 			luxrays::RandomGenerator *rndGen, Film *film);
 
 	Film *engineFilm;
-	u_int filmRegionPixelCount;
 
 private:
-	luxrays::SpinLock spinLock;
-	u_int pixelIndex;
+	u_int bucketIndex;
 };
 
 //------------------------------------------------------------------------------
 // Random sampler
 //------------------------------------------------------------------------------
 
-#define RANDOM_THREAD_WORK_SIZE 4096
-
 class RandomSampler : public Sampler {
 public:
 	RandomSampler(luxrays::RandomGenerator *rnd, Film *flm,
-			const FilmSampleSplatter *flmSplatter,
-			const float adaptiveStrength,
-			RandomSamplerSharedData *samplerSharedData);
+			const FilmSampleSplatter *flmSplatter, const bool imgSamplesEnable,
+			const float adaptiveStrength, const float adaptiveUserImpWeight,
+			const u_int bucketSize, const u_int tileSize, const u_int superSampling,
+			const u_int overlapping, RandomSamplerSharedData *samplerSharedData);
 	virtual ~RandomSampler() { }
 
 	virtual SamplerType GetType() const { return GetObjectType(); }
 	virtual std::string GetTag() const { return GetObjectTag(); }
-	virtual void RequestSamples(const u_int size);
+	virtual void RequestSamples(const SampleType sampleType, const u_int size);
 
 	virtual float GetSample(const u_int index);
 	virtual void NextSample(const std::vector<SampleResult> &sampleResults);
@@ -95,10 +94,11 @@ private:
 	static const luxrays::Properties &GetDefaultProps();
 	
 	RandomSamplerSharedData *sharedData;
-	float adaptiveStrength;
+	float adaptiveStrength, adaptiveUserImportanceWeight;
+	u_int bucketSize, tileSize, superSampling, overlapping;
 
 	float sample0, sample1;
-	u_int pixelIndexBase, pixelIndexOffset;
+	u_int bucketIndex, pixelOffset, passOffset, pass;
 };
 
 }

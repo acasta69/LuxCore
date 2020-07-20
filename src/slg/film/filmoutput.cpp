@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -111,6 +111,10 @@ size_t Film::GetOutputSize(const FilmOutputs::FilmOutputType type) const {
 			return 3 * pixelCount;
 		case FilmOutputs::AVG_SHADING_NORMAL:
 			return 3 * pixelCount;
+		case FilmOutputs::NOISE:
+			return pixelCount;
+		case FilmOutputs::USER_IMPORTANCE:
+			return pixelCount;
 		default:
 			throw runtime_error("Unknown FilmOutputType in Film::GetOutputSize(): " + ToString(type));
 	}
@@ -184,6 +188,10 @@ bool Film::HasOutput(const FilmOutputs::FilmOutputType type) const {
 			return HasChannel(ALBEDO);
 		case FilmOutputs::AVG_SHADING_NORMAL:
 			return HasChannel(AVG_SHADING_NORMAL);
+		case FilmOutputs::NOISE:
+			return HasChannel(NOISE);
+		case FilmOutputs::USER_IMPORTANCE:
+			return HasChannel(USER_IMPORTANCE);
 		default:
 			throw runtime_error("Unknown film output type in Film::HasOutput(): " + ToString(type));
 	}
@@ -423,9 +431,20 @@ void Film::Output(const string &fileName,const FilmOutputs::FilmOutputType type,
 		case FilmOutputs::ALBEDO:
 			if (!HasChannel(ALBEDO))
 				return;
+			break;
 		case FilmOutputs::AVG_SHADING_NORMAL:
 			if (!HasChannel(AVG_SHADING_NORMAL))
 				return;
+			break;
+		case FilmOutputs::NOISE:
+			if (!HasChannel(NOISE))
+				return;
+			channelCount = 1;
+			break;
+		case FilmOutputs::USER_IMPORTANCE:
+			if (!HasChannel(USER_IMPORTANCE))
+				return;
+			channelCount = 1;
 			break;
 		default:
 			throw runtime_error("Unknown film output type in Film::Output(): " + ToString(type));
@@ -486,6 +505,8 @@ void Film::Output(const string &fileName,const FilmOutputs::FilmOutputType type,
 		ImageSpec spec(width, height, (channelCount == 1) ? 3 : channelCount, TypeDesc::FLOAT);
 		buffer.reset(spec);
 	
+		const double RADIANCE_PER_SCREEN_NORMALIZED_SampleCount = samplesCounts.GetSampleCount_RADIANCE_PER_SCREEN_NORMALIZED();
+		
 		for (ImageBuf::ConstIterator<float> it(buffer); !it.done(); ++it) {
 			u_int x = it.x();
 			u_int y = it.y();
@@ -498,7 +519,8 @@ void Film::Output(const string &fileName,const FilmOutputs::FilmOutputType type,
 			switch (type) {
 				case FilmOutputs::RGB: {
 					// Accumulate all light groups			
-					GetPixelFromMergedSampleBuffers(0, x, y, pixel);
+					GetPixelFromMergedSampleBuffers(0, RADIANCE_PER_SCREEN_NORMALIZED_SampleCount,
+							x, y, pixel);
 					break;
 				}
 				case FilmOutputs::RGB_IMAGEPIPELINE: {
@@ -507,7 +529,8 @@ void Film::Output(const string &fileName,const FilmOutputs::FilmOutputType type,
 				}
 				case FilmOutputs::RGBA: {
 					// Accumulate all light groups
-					GetPixelFromMergedSampleBuffers(0, x, y, pixel);
+					GetPixelFromMergedSampleBuffers(0, RADIANCE_PER_SCREEN_NORMALIZED_SampleCount,
+							x, y, pixel);
 					channel_ALPHA->GetWeightedPixel(x, y, &pixel[3]);
 					break;
 				}
@@ -583,7 +606,7 @@ void Film::Output(const string &fileName,const FilmOutputs::FilmOutputType type,
 						channel_RADIANCE_PER_SCREEN_NORMALIZEDs[radianceGroupIndex]->AccumulateWeightedPixel(x, y, pixel);
 
 						// Normalize the value
-						const float factor = statsTotalSampleCount / pixelCount;
+						const float factor = RADIANCE_PER_SCREEN_NORMALIZED_SampleCount / pixelCount;
 						pixel[0] *= factor;
 						pixel[1] *= factor;
 						pixel[2] *= factor;
@@ -645,6 +668,14 @@ void Film::Output(const string &fileName,const FilmOutputs::FilmOutputType type,
 						pixel[1] *= k;
 						pixel[2] *= k;
 					}*/
+					break;
+				}
+				case FilmOutputs::NOISE: {
+					channel_NOISE->GetWeightedPixel(x, y, pixel);
+					break;
+				}
+				case FilmOutputs::USER_IMPORTANCE: {
+					channel_USER_IMPORTANCE->GetWeightedPixel(x, y, pixel);
 					break;
 				}
 				default:
@@ -709,8 +740,12 @@ template<> void Film::GetOutput<float>(const FilmOutputs::FilmOutputType type, f
 
 	switch (type) {
 		case FilmOutputs::RGB: {
+			const double RADIANCE_PER_SCREEN_NORMALIZED_SampleCount = samplesCounts.GetSampleCount_RADIANCE_PER_SCREEN_NORMALIZED();
+
 			for (u_int i = 0; i < pixelCount; ++i)
-				GetPixelFromMergedSampleBuffers(0, i, &buffer[i * 3]);
+				GetPixelFromMergedSampleBuffers(0,
+						RADIANCE_PER_SCREEN_NORMALIZED_SampleCount,
+						i, &buffer[i * 3]);
 			break;
 		}
 		case FilmOutputs::RGB_IMAGEPIPELINE:
@@ -720,9 +755,13 @@ template<> void Film::GetOutput<float>(const FilmOutputs::FilmOutputType type, f
 			copy(channel_IMAGEPIPELINEs[index]->GetPixels(), channel_IMAGEPIPELINEs[index]->GetPixels() + pixelCount * 3, buffer);
 			break;
 		case FilmOutputs::RGBA: {
+			const double RADIANCE_PER_SCREEN_NORMALIZED_SampleCount = samplesCounts.GetSampleCount_RADIANCE_PER_SCREEN_NORMALIZED();
+
 			for (u_int i = 0; i < pixelCount; ++i) {
 				const u_int offset = i * 4;
-				GetPixelFromMergedSampleBuffers(0, i, &buffer[offset]);
+				GetPixelFromMergedSampleBuffers(0,
+						RADIANCE_PER_SCREEN_NORMALIZED_SampleCount,
+						i, &buffer[offset]);
 				channel_ALPHA->GetWeightedPixel(i, &buffer[offset + 3]);
 			}
 			break;
@@ -883,6 +922,12 @@ template<> void Film::GetOutput<float>(const FilmOutputs::FilmOutputType type, f
 				channel_AVG_SHADING_NORMAL->GetWeightedPixel(i, &buffer[i * 3]);
 			break;
 		}
+		case FilmOutputs::NOISE:
+			copy(channel_NOISE->GetPixels(), channel_NOISE->GetPixels() + pixelCount, buffer);
+			break;
+		case FilmOutputs::USER_IMPORTANCE:
+			copy(channel_USER_IMPORTANCE->GetPixels(), channel_USER_IMPORTANCE->GetPixels() + pixelCount, buffer);
+			break;
 		default:
 			throw runtime_error("Unknown film output type in Film::GetOutput<float>(): " + ToString(type));
 	}

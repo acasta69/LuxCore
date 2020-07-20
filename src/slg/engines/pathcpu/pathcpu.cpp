@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -21,6 +21,7 @@
 #include "slg/engines/caches/photongi/photongicache.h"
 #include "slg/film/filters/filter.h"
 #include "slg/samplers/sobol.h"
+#include "slg/samplers/metropolis.h"
 
 using namespace std;
 using namespace luxrays;
@@ -31,21 +32,31 @@ using namespace slg;
 //------------------------------------------------------------------------------
 
 PathCPURenderEngine::PathCPURenderEngine(const RenderConfig *rcfg) :
-		CPUNoTileRenderEngine(rcfg), photonGICache(nullptr) {
+		CPUNoTileRenderEngine(rcfg), photonGICache(nullptr),
+		lightSamplerSharedData(nullptr) {
 }
 
 PathCPURenderEngine::~PathCPURenderEngine() {
 	delete photonGICache;
+	delete lightSamplerSharedData;
 }
 
 void PathCPURenderEngine::InitFilm() {
 	film->AddChannel(Film::RADIANCE_PER_PIXEL_NORMALIZED);
+
+	// pathTracer has not yet been initialized
+	const bool hybridBackForwardEnable = renderConfig->cfg.Get(PathTracer::GetDefaultProps().
+			Get("path.hybridbackforward.enable")).Get<bool>();
+	if (hybridBackForwardEnable)
+		film->AddChannel(Film::RADIANCE_PER_SCREEN_NORMALIZED);
+
 	film->SetRadianceGroupCount(renderConfig->scene->lightDefs.GetLightGroupCount());
+	film->SetThreadCount(renderThreads.size());
 	film->Init();
 }
 
 RenderState *PathCPURenderEngine::GetRenderState() {
-	return new PathCPURenderState(bootStrapSeed);
+	return new PathCPURenderState(bootStrapSeed, photonGICache);
 }
 
 void PathCPURenderEngine::StartLockLess() {
@@ -76,28 +87,6 @@ void PathCPURenderEngine::StartLockLess() {
 	}
 
 	//--------------------------------------------------------------------------
-	// Allocate PhotonGICache if enabled
-	//--------------------------------------------------------------------------
-
-	if (GetType() != RTPATHCPU) {
-		delete photonGICache;
-		photonGICache = PhotonGICache::FromProperties(renderConfig->scene, cfg);
-
-		// photonGICache will be nullptr if the cache is disabled
-		if (photonGICache)
-			photonGICache->Preprocess();
-	}
-
-	//--------------------------------------------------------------------------
-	// Initialize the PathTracer class with rendering parameters
-	//--------------------------------------------------------------------------
-
-	pathTracer.ParseOptions(cfg, GetDefaultProps());
-
-	pathTracer.InitPixelFilterDistribution(pixelFilter);
-	pathTracer.SetPhotonGICache(photonGICache);
-
-	//--------------------------------------------------------------------------
 	// Restore render state if there is one
 	//--------------------------------------------------------------------------
 
@@ -112,10 +101,44 @@ void PathCPURenderEngine::StartLockLess() {
 		SLG_LOG("Continuing the rendering with new PATHCPU seed: " + ToString(newSeed));
 		SetSeed(newSeed);
 		
+		// Transfer the ownership of PhotonGI cache pointer
+		photonGICache = rs->photonGICache;
+		rs->photonGICache = nullptr;
+		
+		// I have to set the scene pointer in photonGICache because it is not
+		// saved by serialization
+		if (photonGICache)
+			photonGICache->SetScene(renderConfig->scene);
+
 		delete startRenderState;
 		startRenderState = NULL;
 	}
 
+	//--------------------------------------------------------------------------
+	// Allocate PhotonGICache if enabled
+	//--------------------------------------------------------------------------
+
+	// note: photonGICache could have been restored from the render state
+	if ((GetType() != RTPATHCPU) && !photonGICache) {
+		photonGICache = PhotonGICache::FromProperties(renderConfig->scene, cfg);
+
+		// photonGICache will be nullptr if the cache is disabled
+		if (photonGICache)
+			photonGICache->Preprocess(renderThreads.size());
+	}
+
+	//--------------------------------------------------------------------------
+	// Initialize the PathTracer class with rendering parameters
+	//--------------------------------------------------------------------------
+
+	pathTracer.ParseOptions(cfg, GetDefaultProps());
+
+	if (pathTracer.hybridBackForwardEnable)
+		lightSamplerSharedData = MetropolisSamplerSharedData::FromProperties(Properties(), &seedBaseGenerator, film);
+
+	pathTracer.InitPixelFilterDistribution(pixelFilter);
+	pathTracer.SetPhotonGICache(photonGICache);
+	
 	//--------------------------------------------------------------------------
 
 	CPUNoTileRenderEngine::StartLockLess();
@@ -126,8 +149,18 @@ void PathCPURenderEngine::StopLockLess() {
 
 	pathTracer.DeletePixelFilterDistribution();
 
+	delete lightSamplerSharedData;
+	lightSamplerSharedData = nullptr;
+
 	delete photonGICache;
 	photonGICache = nullptr;
+}
+
+void PathCPURenderEngine::EndSceneEditLockLess(const EditActionList &editActions) {
+	if (lightSamplerSharedData)
+		lightSamplerSharedData->Reset();
+
+	CPURenderEngine::EndSceneEditLockLess(editActions);
 }
 
 //------------------------------------------------------------------------------

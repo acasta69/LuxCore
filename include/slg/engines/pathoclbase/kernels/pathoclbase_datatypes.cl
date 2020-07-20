@@ -1,7 +1,7 @@
 #line 2 "pathoclstatebase_datatypes.cl"
 
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -23,10 +23,6 @@
 //------------------------------------------------------------------------------
 
 #if defined(SLG_OPENCL_KERNEL)
-
-#if defined(PARAM_USE_PIXEL_ATOMICS)
-#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
-#endif
 
 #ifndef TRUE
 #define TRUE 1
@@ -58,61 +54,66 @@ typedef enum {
 } PathState;
 
 typedef struct {
-	unsigned int depth, diffuseDepth, glossyDepth, specularDepth;
-} PathDepthInfo;
+	union {
+		struct {
+			// Must be a power of 2
+			unsigned int previewResolutionReduction, previewResolutionReductionStep;
+			unsigned int resolutionReduction;
+		} rtpathocl;
+	} renderEngine;
+
+	Scene scene;
+	Sampler sampler;
+	PathTracer pathTracer;
+	Filter pixelFilter;
+	Film film;
+} GPUTaskConfiguration;
 
 typedef struct {
-	unsigned int lightIndex;	
+	unsigned int lightIndex;
 	float pickPdf;
 
-	Vector dir;
-	float distance, directPdfW;
+	float directPdfW;
 
 	// Radiance to add to the result if light source is visible
 	// Note: it doesn't include the pathThroughput
 	Spectrum lightRadiance;
-	// This is used only if PARAM_FILM_CHANNELS_HAS_IRRADIANCE is defined and
+	// This is used only if Film channel IRRADIANCE is enabled and
 	// only for the first path vertex
 	Spectrum lightIrradiance;
 
 	unsigned int lightID;
 } DirectLightIlluminateInfo;
 
-// This is defined only under OpenCL because of variable size structures
-#if defined(SLG_OPENCL_KERNEL)
-
 // The state used to keep track of the rendered path
 typedef struct {
 	PathState state;
-	PathDepthInfo depthInfo;
 
 	Spectrum throughput;
 	BSDF bsdf; // Variable size structure
 
-#if defined(PARAM_HAS_PASSTHROUGH)
 	Seed seedPassThroughEvent;
-#endif
 	
-	int albedoToDo, photonGICausticCacheAlreadyUsed, photonGICacheEnabledOnLastHit;
+	int albedoToDo, photonGICacheEnabledOnLastHit,
+			photonGICausticCacheUsed, photonGIShowIndirectPathMixUsed,
+			// The shadow transparency lag used by Scene_Intersect()
+			throughShadowTransparency;
 } GPUTaskState;
+
+typedef enum {
+	ILLUMINATED, SHADOWED, NOT_VISIBLE
+} DirectLightResult;
 
 typedef struct {
 	// Used to store some intermediate result
 	DirectLightIlluminateInfo illumInfo;
 
-	BSDFEvent lastBSDFEvent;
-	float lastPdfW, lastGlossiness;
-
-	Normal lastNormal;
-#if defined(PARAM_HAS_VOLUMES)
-	int lastIsVolume;
-#endif
-
-#if defined(PARAM_HAS_PASSTHROUGH)
 	Seed seedPassThroughEvent;
-#endif
 
-	int isLightVisible;
+	DirectLightResult directLightResult;
+
+	// The shadow transparency flag used by Scene_Intersect()
+	int throughShadowTransparency;
 } GPUTaskDirectLight;
 
 typedef struct {
@@ -120,17 +121,16 @@ typedef struct {
 	Seed seed;
 
 	// Space for temporary storage
-#if defined(PARAM_HAS_PASSTHROUGH) || defined(PARAM_HAS_VOLUMES)
 	BSDF tmpBsdf; // Variable size structure
-#endif
 
 	// This is used by TriangleLight_Illuminate() to temporary store the
 	// point on the light sources.
 	// Also used by Scene_Intersect() for evaluating volume textures.
 	HitPoint tmpHitPoint;
+	
+	// This is used by DirectLight_BSDFSampling()
+	PathDepthInfo tmpPathDepthInfo;
 } GPUTask;
-
-#endif
 
 typedef struct {
 	unsigned int sampleCount;

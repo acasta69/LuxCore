@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -29,10 +29,12 @@ namespace slg {
 
 class RoughGlassMaterial : public Material {
 public:
-	RoughGlassMaterial(const Texture *transp, const Texture *emitted, const Texture *bump,
+	RoughGlassMaterial(const Texture *frontTransp, const Texture *backTransp,
+			const Texture *emitted, const Texture *bump,
 			const Texture *refl, const Texture *trans,
 			const Texture *exteriorIorFact, const Texture *interiorIorFact,
-			const Texture *u, const Texture *v);
+			const Texture *u, const Texture *v,
+			const Texture *filmThickness, const Texture *filmIor);
 
 	virtual MaterialType GetType() const { return ROUGHGLASS; }
 	virtual BSDFEvent GetEventTypes() const { return GLOSSY | REFLECT | TRANSMIT; };
@@ -44,7 +46,7 @@ public:
 	virtual luxrays::Spectrum Sample(const HitPoint &hitPoint,
 		const luxrays::Vector &localFixedDir, luxrays::Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const;
+		float *pdfW, BSDFEvent *event, const BSDFEvent eventHint = NONE) const;
 	virtual void Pdf(const HitPoint &hitPoint,
 		const luxrays::Vector &localLightDir, const luxrays::Vector &localEyeDir,
 		float *directPdfW, float *reversePdfW) const;
@@ -60,6 +62,8 @@ public:
 	const Texture *GetInteriorIOR() const { return interiorIor; }
 	const Texture *GetNu() const { return nu; }
 	const Texture *GetNv() const { return nv; }
+	const Texture *GetFilmThickness() const { return filmThickness; }
+	const Texture *GetFilmIOR() const { return filmIor; }
 
 private:
 	const Texture *Kr;
@@ -68,6 +72,8 @@ private:
 	const Texture *interiorIor;
 	const Texture *nu;
 	const Texture *nv;
+	const Texture *filmThickness;
+	const Texture *filmIor;
 };
 
 }

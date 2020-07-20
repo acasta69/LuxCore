@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -35,7 +35,7 @@ class RTPathOCLRenderEngine;
 
 class RTPathOCLRenderThread : public TilePathOCLRenderThread {
 public:
-	RTPathOCLRenderThread(const u_int index, luxrays::OpenCLIntersectionDevice *device,
+	RTPathOCLRenderThread(const u_int index, luxrays::HardwareIntersectionDevice *device,
 			TilePathOCLRenderEngine *re);
 	virtual ~RTPathOCLRenderThread();
 
@@ -47,10 +47,10 @@ public:
 	friend class RTPathOCLRenderEngine;
 
 protected:
-	virtual std::string AdditionalKernelOptions();
 	virtual void RenderThreadImpl();
 
 	void UpdateOCLBuffers(const EditActionList &updateActions);
+	void UpdateAllThreadsOCLBuffers();
 
 	TileWork tileWork;
 };
@@ -58,6 +58,14 @@ protected:
 //------------------------------------------------------------------------------
 // Real-Time path tracing 100% OpenCL render engine
 //------------------------------------------------------------------------------
+
+typedef enum {
+	SYNCTYPE_NONE,
+	SYNCTYPE_STOP,
+	SYNCTYPE_ENDSCENEEDIT,
+	SYNCTYPE_BEGINFILMEDIT
+} RTPathOCLSyncType;
+
 
 class RTPathOCLRenderEngine : public TilePathOCLRenderEngine {
 public:
@@ -95,20 +103,29 @@ public:
 protected:
 	static const luxrays::Properties &GetDefaultProps();
 
+	virtual void InitGPUTaskConfiguration();
 	virtual bool IsRTMode() const { return true; }
 
 	virtual PathOCLBaseOCLRenderThread *CreateOCLThread(const u_int index,
-			luxrays::OpenCLIntersectionDevice *device);
+			luxrays::HardwareIntersectionDevice *device);
 
 	virtual void StartLockLess();
 	virtual void StopLockLess();
 	virtual void UpdateFilmLockLess();
 
+	void PauseThreads();
+	void ResumeThreads();
+
 	EditActionList updateActions;
 
+	// Used by RTPathOCLRenderEngine code to sync. with render thread 0
+	boost::barrier *syncBarrier;
+	RTPathOCLSyncType syncType;
+
+	// Used by all render threads to sync.
 	boost::barrier *frameBarrier;
-	double frameStartTime, frameTime;
-	u_int frameCounter;
+
+	double frameTime;
 };
 
 }

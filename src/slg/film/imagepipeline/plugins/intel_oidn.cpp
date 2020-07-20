@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -17,6 +17,7 @@
  ***************************************************************************/
 
 #include <boost/format.hpp>
+#include <math.h>
 
 #include "slg/film/imagepipeline/plugins/intel_oidn.h"
 
@@ -30,14 +31,25 @@ using namespace slg;
 
 BOOST_CLASS_EXPORT_IMPLEMENT(slg::IntelOIDN)
 
+IntelOIDN::IntelOIDN(const string ft, const int m, const float s) {
+	filterType = ft;
+	oidnMemLimit = m;
+	sharpness = s;
+}
+
 IntelOIDN::IntelOIDN() {
+	filterType = "RT";
+	oidnMemLimit = 6000;
+	sharpness = 0.f;
 }
 
 ImagePipelinePlugin *IntelOIDN::Copy() const {
-    return new IntelOIDN();
+	return new IntelOIDN(filterType, oidnMemLimit, sharpness);
 }
 
 void IntelOIDN::Apply(Film &film, const u_int index) {
+	const double SuperStartTime = WallClockTime();
+	SLG_LOG("[IntelOIDNPlugin] Applying single OIDN");
     Spectrum *pixels = (Spectrum *)film.channel_IMAGEPIPELINEs[index]->GetPixels();
 
     const u_int width = film.GetWidth();
@@ -51,9 +63,10 @@ void IntelOIDN::Apply(Film &film, const u_int index) {
     oidn::DeviceRef device = oidn::newDevice();
     device.commit();
 
-    oidn::FilterRef filter = device.newFilter("RT");
+    oidn::FilterRef filter = device.newFilter(filterType.c_str());
 
     filter.set("hdr", true);
+	filter.set("maxMemoryMB", oidnMemLimit);
     filter.setImage("color", (float *)pixels, oidn::Format::Float3, width, height);
     if (film.HasChannel(Film::ALBEDO)) {
 		albedoBuffer.resize(3 * pixelCount);
@@ -89,8 +102,10 @@ void IntelOIDN::Apply(Film &film, const u_int index) {
     SLG_LOG("IntelOIDNPlugin copying output buffer");
     for (u_int i = 0; i < pixelCount; ++i) {
         const u_int i3 = i * 3;
-        pixels[i].c[0] = outputBuffer[i3];
-        pixels[i].c[1] = outputBuffer[i3 + 1];
-        pixels[i].c[2] = outputBuffer[i3 + 2];
+        pixels[i].c[0] = Lerp(sharpness, outputBuffer[i3], pixels[i].c[0]);
+        pixels[i].c[1] = Lerp(sharpness, outputBuffer[i3 + 1], pixels[i].c[1]);
+        pixels[i].c[2] = Lerp(sharpness, outputBuffer[i3 + 2], pixels[i].c[2]);
 	}
+
+	SLG_LOG("IntelOIDNPlugin single execution took a total of " << (boost::format("%.1f") % (WallClockTime() - SuperStartTime)) << "secs");
 }

@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -101,22 +101,13 @@ float HomogeneousVolume::Scatter(const Ray &ray, const float u,
 	// Check if I have to support multi-scattering
 	const bool scatterAllowed = (!scatteredStart || multiScattering);
 
-	const HitPoint hitPoint =  {
-		ray.d,
-		ray.o,
-		UV(),
-		Normal(-ray.d),
-		Normal(-ray.d),
-		Spectrum(1.f),
-		Vector(0.f, 0.f, 0.f), Vector(0.f, 0.f, 0.f),
-		Normal(0.f, 0.f, 0.f), Normal(0.f, 0.f, 0.f),
-		1.f,
-		0.f, // It doesn't matter here
-		Transform(),
-		this, this, // It doesn't matter here
-		true, true, // It doesn't matter here
-		0
-	};
+	// Point where to evaluate the volume
+	HitPoint hitPoint;
+	hitPoint.Init();
+	hitPoint.fixedDir = ray.d;
+	hitPoint.p = ray.o;
+	hitPoint.geometryN = hitPoint.interpolatedN = hitPoint.shadeN = Normal(-ray.d);
+	hitPoint.passThroughEvent = u;
 
 	const Spectrum sigmaA = SigmaA(hitPoint);
 	const Spectrum sigmaS = SigmaS(hitPoint);
@@ -147,9 +138,9 @@ Spectrum HomogeneousVolume::Evaluate(const HitPoint &hitPoint,
 Spectrum HomogeneousVolume::Sample(const HitPoint &hitPoint,
 		const Vector &localFixedDir, Vector *localSampledDir,
 		const float u0, const float u1, const float passThroughEvent,
-		float *pdfW, float *absCosSampledDir, BSDFEvent *event) const {
+		float *pdfW, BSDFEvent *event, const BSDFEvent eventHint) const {
 	return schlickScatter.Sample(hitPoint, localFixedDir, localSampledDir,
-			u0, u1, passThroughEvent, pdfW, absCosSampledDir, event);
+			u0, u1, passThroughEvent, pdfW, event);
 }
 
 void HomogeneousVolume::Pdf(const HitPoint &hitPoint,
@@ -159,7 +150,7 @@ void HomogeneousVolume::Pdf(const HitPoint &hitPoint,
 }
 
 void HomogeneousVolume::AddReferencedTextures(boost::unordered_set<const Texture *> &referencedTexs) const {
-	Material::AddReferencedTextures(referencedTexs);
+	Volume::AddReferencedTextures(referencedTexs);
 
 	sigmaA->AddReferencedTextures(referencedTexs);
 	sigmaS->AddReferencedTextures(referencedTexs);
@@ -167,7 +158,7 @@ void HomogeneousVolume::AddReferencedTextures(boost::unordered_set<const Texture
 }
 
 void HomogeneousVolume::UpdateTextureReferences(const Texture *oldTex, const Texture *newTex) {
-	Material::UpdateTextureReferences(oldTex, newTex);
+	Volume::UpdateTextureReferences(oldTex, newTex);
 
 	if (sigmaA == oldTex)
 		sigmaA = newTex;
@@ -182,9 +173,9 @@ Properties HomogeneousVolume::ToProperties() const {
 
 	const string name = GetName();
 	props.Set(Property("scene.volumes." + name + ".type")("homogeneous"));
-	props.Set(Property("scene.volumes." + name + ".absorption")(sigmaA->GetName()));
-	props.Set(Property("scene.volumes." + name + ".scattering")(sigmaS->GetName()));
-	props.Set(Property("scene.volumes." + name + ".asymmetry")(schlickScatter.g->GetName()));
+	props.Set(Property("scene.volumes." + name + ".absorption")(sigmaA->GetSDLValue()));
+	props.Set(Property("scene.volumes." + name + ".scattering")(sigmaS->GetSDLValue()));
+	props.Set(Property("scene.volumes." + name + ".asymmetry")(schlickScatter.g->GetSDLValue()));
 	props.Set(Property("scene.volumes." + name + ".multiscattering")(multiScattering));
 	props.Set(Volume::ToProperties());
 

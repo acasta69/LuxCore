@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -28,6 +28,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/format.hpp>
 #include <boost/unordered_set.hpp>
 
@@ -40,6 +41,7 @@
 #include "slg/scene/scene.h"
 #include "slg/textures/constfloat.h"
 #include "slg/textures/constfloat3.h"
+#include "slg/utils/pathinfo.h"
 
 using namespace std;
 using namespace luxrays;
@@ -99,6 +101,11 @@ Properties Scene::ToProperties(const bool useRealFileName) const {
 
 		// Write the textures information
 		for (auto const &texName : texNames) {
+			// I can skip all textures starting with Implicit-ConstFloatTexture(3)
+			// because they are expanded inline
+			if (boost::starts_with(texName, "Implicit-ConstFloatTexture"))
+				continue;
+
 			const Texture *tex = texDefs.GetTexture(texName);
 			props.Set(tex->ToProperties(imgMapCache, useRealFileName));
 		}
@@ -191,13 +198,37 @@ void Scene::DefineMesh(ExtMesh *mesh) {
 }
 
 void Scene::DefineMesh(const string &shapeName,
-	const long plyNbVerts, const long plyNbTris,
-	Point *p, Triangle *vi, Normal *n, UV *uv,
-	Spectrum *cols, float *alphas) {
-	ExtTriangleMesh *mesh = new ExtTriangleMesh(plyNbVerts, plyNbTris, p, vi, n, uv, cols, alphas);
+		const long plyNbVerts, const long plyNbTris,
+		Point *p, Triangle *vi, Normal *n,
+		UV *uvs, Spectrum *cols, float *alphas) {
+	ExtTriangleMesh *mesh = new ExtTriangleMesh(plyNbVerts, plyNbTris, p, vi, n,
+			uvs, cols, alphas);
 	mesh->SetName(shapeName);
 	
 	DefineMesh(mesh);
+}
+
+void Scene::DefineMeshExt(const string &shapeName,
+		const long plyNbVerts, const long plyNbTris,
+		Point *p, Triangle *vi, Normal *n,
+		array<UV *, EXTMESH_MAX_DATA_COUNT> *uvs,
+		array<Spectrum *, EXTMESH_MAX_DATA_COUNT> *cols,
+		array<float *, EXTMESH_MAX_DATA_COUNT> *alphas) {
+	ExtTriangleMesh *mesh = new ExtTriangleMesh(plyNbVerts, plyNbTris, p, vi, n,
+			uvs, cols, alphas);
+	mesh->SetName(shapeName);
+	
+	DefineMesh(mesh);
+}
+
+void Scene::SetMeshVertexAOV(const string &meshName,
+		const unsigned int index, float *data) {
+	extMeshCache.SetMeshVertexAOV(meshName, index, data);
+}
+
+void Scene::SetMeshTriangleAOV(const string &meshName,
+		const unsigned int index, float *data) {
+	extMeshCache.SetMeshTriangleAOV(meshName, index, data);
 }
 
 void Scene::DefineMesh(const string &instMeshName, const string &meshName,
@@ -317,6 +348,8 @@ void Scene::RemoveUnusedImageMaps() {
 	boost::unordered_set<const ImageMap *> referencedImgMaps;
 	for (u_int i = 0; i < texDefs.GetSize(); ++i)
 		texDefs.GetTexture(i)->AddReferencedImageMaps(referencedImgMaps);
+	for (u_int i = 0; i < objDefs.GetSize(); ++i)
+		objDefs.GetSceneObject(i)->AddReferencedImageMaps(referencedImgMaps);
 
 	// Add the light image maps
 
@@ -421,16 +454,16 @@ void Scene::RemoveUnusedMeshes() {
 	for (u_int i = 0; i < objDefs.GetSize(); ++i)
 		objDefs.GetSceneObject(i)->AddReferencedMeshes(referencedMesh);
 
-	// Get the list of all defined objects
-	vector<string> definedObjects;
-	objDefs.GetSceneObjectNames(definedObjects);
+	// Get the list of all defined meshes
+	vector<string> definedExtMeshes;
+	extMeshCache.GetExtMeshNames(definedExtMeshes);
 	bool deleted = false;
-	BOOST_FOREACH(const string  &objName, definedObjects) {
-		SceneObject *obj = objDefs.GetSceneObject(objName);
+	BOOST_FOREACH(const string  &extMeshName, definedExtMeshes) {
+		ExtMesh *mesh = extMeshCache.GetExtMesh(extMeshName);
 
-		if (referencedMesh.count(obj->GetExtMesh()) == 0) {
-			SDL_LOG("Deleting unreferenced mesh: " << objName);
-			objDefs.DeleteSceneObject(objName);
+		if (referencedMesh.count(mesh) == 0) {
+			SDL_LOG("Deleting unreferenced mesh: " << extMeshName);
+			extMeshCache.DeleteExtMesh(extMeshName);
 			deleted = true;
 		}
 	}
@@ -471,10 +504,10 @@ void Scene::DeleteLight(const string &lightName) {
 //------------------------------------------------------------------------------
 
 bool Scene::Intersect(IntersectionDevice *device,
-		const bool fromLight, const bool cameraRay, PathVolumeInfo *volInfo,
+		const SceneRayType rayType, PathVolumeInfo *volInfo,
 		const float initialPassThrough, Ray *ray, RayHit *rayHit, BSDF *bsdf,
 		Spectrum *connectionThroughput, const Spectrum *pathThroughput,
-		SampleResult *sampleResult) const {
+		SampleResult *sampleResult, const bool backTracing) const {
 	*connectionThroughput = Spectrum(1.f);
 
 	// I need a sequence of pseudo-random numbers starting form a floating point
@@ -484,24 +517,21 @@ bool Scene::Intersect(IntersectionDevice *device,
 	float passThrough = rng.floatValue();
 	const float originalMaxT = ray->maxt;
 
+	const bool fromLight = rayType & LIGHT_RAY;
+	const bool cameraRay = rayType & CAMERA_RAY;
+	const bool shadowRay = rayType & SHADOW_RAY;
+	bool throughShadowTransparency = false;
+
+	// This field can be checked by the calling code even if there was no
+	// intersection (and not BSDF initialization)
+	bsdf->hitPoint.throughShadowTransparency = false;
+
 	for (;;) {
 		const bool hit = device ? device->TraceRay(ray, rayHit) : dataSet->GetAccelerator()->Intersect(ray, rayHit);
 
-		if (cameraRay && hit && objDefs.GetSceneObject(rayHit->meshIndex)->IsCameraInvisible()) {
-			// It is a camera invisible object, continue to trace
-			ray->mint = rayHit->t + MachineEpsilon::E(rayHit->t);
-			ray->maxt = originalMaxT;
-
-			// A safety check
-			if (ray->mint >= ray->maxt)
-				return false;
-			
-			continue;
-		}
-
 		const Volume *rayVolume = volInfo->GetCurrentVolume();
 		if (hit) {
-			bsdf->Init(fromLight, *this, *ray, *rayHit, passThrough, volInfo);
+			bsdf->Init(fromLight, throughShadowTransparency, *this, *ray, *rayHit, passThrough, volInfo);
 			rayVolume = bsdf->hitPoint.intoObject ? bsdf->hitPoint.exteriorVolume : bsdf->hitPoint.interiorVolume;
 			ray->maxt = rayHit->t;
 		} else if (!rayVolume) {
@@ -536,7 +566,7 @@ bool Scene::Intersect(IntersectionDevice *device,
 				// used (and the bug will be noticed)
 				rayHit->meshIndex = 0xfffffffeu;
 
-				bsdf->Init(fromLight, *this, *ray, *rayVolume, t, passThrough);
+				bsdf->Init(fromLight, throughShadowTransparency, *this, *ray, *rayVolume, t, passThrough);
 				volInfo->SetScatteredStart(true);
 
 				return true;
@@ -544,14 +574,27 @@ bool Scene::Intersect(IntersectionDevice *device,
 		}
 
 		if (hit) {
-			// Check if the volume priority system tells me to continue to trace the ray
-			bool continueToTrace = volInfo->ContinueToTrace(*bsdf);
+			bool continueToTrace =
+					// Check if the volume priority system tells me to continue to trace the ray
+					volInfo->ContinueToTrace(*bsdf) ||
+					// Check if it is a camera invisible object and we are a tracing a camera ray
+					(cameraRay && objDefs.GetSceneObject(rayHit->meshIndex)->IsCameraInvisible());
 
 			// Check if it is a pass through point
 			if (!continueToTrace) {
-				const Spectrum transp = bsdf->GetPassThroughTransparency();
+				const Spectrum transp = bsdf->GetPassThroughTransparency(backTracing);
 				if (!transp.Black()) {
 					*connectionThroughput *= transp;
+					continueToTrace = true;
+				}
+			}
+
+			if (!continueToTrace && shadowRay) {
+				const Spectrum &shadowTransparency = bsdf->GetPassThroughShadowTransparency();
+				
+				if (!shadowTransparency.Black()) {
+					*connectionThroughput *= shadowTransparency;
+					throughShadowTransparency = true;
 					continueToTrace = true;
 				}
 			}
@@ -564,8 +607,8 @@ bool Scene::Intersect(IntersectionDevice *device,
 				ray->mint = rayHit->t + MachineEpsilon::E(rayHit->t);
 				ray->maxt = originalMaxT;
 
-				// A safety check
-				if (ray->mint >= ray->maxt)
+				// A safety check in case of not enough numerical precision
+				if ((ray->mint == rayHit->t) || (ray->mint >= ray->maxt))
 					return false;
 			} else
 				return true;

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright 1998-2018 by authors (see AUTHORS.txt)
+# Copyright 1998-2020 by authors (see AUTHORS.txt)
 #
 #   This file is part of LuxCoreRender.
 #
@@ -45,37 +45,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${LuxRays_SOURCE_DIR}/bin)
 SET(LuxRays_INCLUDE_DIR "${LuxRays_SOURCE_DIR}/include")
 include_directories("${LuxRays_INCLUDE_DIR}")
 link_directories("${LuxRays_SOURCE_DIR}/lib")
-
-
-################################################################################
-#
-# Build options
-#
-################################################################################
-
-if (LUXRAYS_DISABLE_OPENCL)
-	ADD_DEFINITIONS("-DLUXRAYS_DISABLE_OPENCL")
-endif()
-
-
-################################################################################
-#
-# Find OpenCL
-#
-################################################################################
-
-if (NOT LUXRAYS_DISABLE_OPENCL)
-	set(OPENCL_ROOT "${OPENCL_SEARCH_PATH}")
-	find_package(OpenCL)
-
-	if (OPENCL_FOUND)
-		include_directories(BEFORE SYSTEM ${OPENCL_INCLUDE_DIR} ${OPENCL_C_INCLUDE_DIR})
-	endif ()
-
-	if (NOT OPENCL_FOUND)
-		MESSAGE(FATAL_ERROR "--> Could not locate required OpenCL files")
-	endif()
-endif()
 
 
 ################################################################################

@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -24,26 +24,27 @@
 
 namespace slg {
 
-class VisibilityParticle;
+class PGICVisibilityParticle;
 
-class PGCIOctree : public IndexOctree<VisibilityParticle> {
+class PGICOctree : public IndexOctree<PGICVisibilityParticle> {
 public:
-	PGCIOctree(const std::vector<VisibilityParticle> &allEntries, const luxrays::BBox &bbox,
+	PGICOctree(const std::vector<PGICVisibilityParticle> &allEntries, const luxrays::BBox &bbox,
 			const float r, const float normAngle, const u_int md = 24);
-	virtual ~PGCIOctree();
+	virtual ~PGICOctree();
 
-	u_int GetNearestEntry(const luxrays::Point &p, const luxrays::Normal &n) const;
+	u_int GetNearestEntry(const luxrays::Point &p, const luxrays::Normal &n,
+			const bool isVolume) const;
 	void GetAllNearEntries(std::vector<u_int> &allNearEntryIndices,
-			const luxrays::Point &p, const luxrays::Normal &n) const;
+			const luxrays::Point &p, const luxrays::Normal &n,
+			const bool isVolume) const;
 
 private:
 	void GetNearestEntryImpl(const IndexOctreeNode *node, const luxrays::BBox &nodeBBox,
-			const luxrays::Point &p, const luxrays::Normal &n,
+			const luxrays::Point &p, const luxrays::Normal &n, const bool isVolume,
 			u_int &nearestEntryIndex, float &nearestDistance2) const;
 	void GetAllNearEntriesImpl(std::vector<u_int> &allNearEntryIndices,
 			const IndexOctreeNode *node, const luxrays::BBox &nodeBBox,
-			const luxrays::Point &p, const luxrays::Normal &n) const;
-
+			const luxrays::Point &p, const luxrays::Normal &n, const bool isVolume) const;
 };
 
 }

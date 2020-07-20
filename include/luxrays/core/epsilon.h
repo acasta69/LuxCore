@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -21,6 +21,7 @@
 #define	_LUXRAYS_EPSILON_H
 
 #include "luxrays/core/geometry/vector.h"
+#include "luxrays/core/geometry/normal.h"
 #include "luxrays/core/geometry/point.h"
 #include "luxrays/core/geometry/bbox.h"
 #include "luxrays/utils/utils.h"
@@ -47,7 +48,7 @@ public:
 
 	// Thread-safe method
 	static float E(const float value) {
-		const float epsilon = fabsf(FloatAdvance(value) - value);
+		const float epsilon = fabsf(NextFloat(value) - value);
 
 		return Clamp(epsilon, minEpsilon, maxEpsilon);
 	}
@@ -63,10 +64,34 @@ public:
 	}
 
 	// Thread-safe method
+	static float E(const Normal &n) {
+		return Max(E(n.x), Max(E(n.y), E(n.z)));
+	}
+
+	// Thread-safe method
 	static float E(const BBox &bb) {
 		return Max(E(bb.pMin), E(bb.pMax));
 	}
 
+	// This method doesn't handle NaN, INFINITY, etc.
+	static float NextFloat(const float value) {
+		MachineFloat mf;
+		mf.f = value;
+
+		mf.i += DEFAULT_EPSILON_DISTANCE_FROM_VALUE;
+
+		return mf.f;
+	}
+
+	// This method doesn't handle NaN, INFINITY, etc.
+	static float PreviousFloat(const float value) {
+		MachineFloat mf;
+		mf.f = value;
+
+		mf.i -= DEFAULT_EPSILON_DISTANCE_FROM_VALUE;
+
+		return mf.f;
+	}
 private:
 	union MachineFloat {
 		float f;
@@ -75,16 +100,6 @@ private:
 
 	static float minEpsilon;
 	static float maxEpsilon;
-
-	// This method doesn't handle NaN, INFINITY, etc.
-	static float FloatAdvance(const float value) {
-		MachineFloat mf;
-		mf.f = value;
-
-		mf.i += DEFAULT_EPSILON_DISTANCE_FROM_VALUE;
-
-		return mf.f;
-	}
 };
 
 }

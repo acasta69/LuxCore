@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -18,8 +18,11 @@
 
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/unordered_set.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include "luxrays/utils/fileext.h"
+#include "luxrays/utils/thread.h"
+
 #include "slg/core/sdl.h"
 #include "slg/film/film.h"
 #include "slg/film/filters/filter.h"
@@ -45,6 +48,9 @@
 #include "slg/film/imagepipeline/plugins/premultiplyalpha.h"
 #include "slg/film/imagepipeline/plugins/mist.h"
 #include "slg/film/imagepipeline/plugins/intel_oidn.h"
+#include "slg/film/imagepipeline/plugins/whitebalance.h"
+#include "slg/film/imagepipeline/plugins/bakemapmargin.h"
+#include "slg/film/imagepipeline/plugins/colorlut.h"
 
 using namespace std;
 using namespace luxrays;
@@ -376,6 +382,18 @@ void Film::ParseOutputs(const Properties &props) {
 				filmOutputs.Add(FilmOutputs::AVG_SHADING_NORMAL, fileName);
 				break;
 			}
+			case FilmOutputs::NOISE: {
+				if (!initialized)
+					AddChannel(Film::NOISE);
+				filmOutputs.Add(FilmOutputs::NOISE, fileName);
+				break;
+			}
+			case FilmOutputs::USER_IMPORTANCE: {
+				if (!initialized)
+					AddChannel(Film::USER_IMPORTANCE);
+				filmOutputs.Add(FilmOutputs::USER_IMPORTANCE, fileName);				
+				break;
+			}
 			default:
 				throw runtime_error("Unknown type in film output: " + type);
 		}
@@ -433,11 +451,8 @@ void Film::ParseRadianceGroupsScale(const Properties &props, const u_int imagePi
 
 void Film::ParseRadianceGroupsScales(const Properties &props) {
 	// Look for the definition of multiple image pipelines
-	vector<string> imagePipelineKeys = props.GetAllUniqueSubNames("film.imagepipelines");
+	vector<string> imagePipelineKeys = props.GetAllUniqueSubNames("film.imagepipelines", true);
 	if (imagePipelineKeys.size() > 0) {
-		// Sort the entries
-		sort(imagePipelineKeys.begin(), imagePipelineKeys.end());
-
 		for (vector<string>::const_iterator imagePipelineKey = imagePipelineKeys.begin(); imagePipelineKey != imagePipelineKeys.end(); ++imagePipelineKey) {
 			// Extract the image pipeline priority name
 			const string imagePipelineNumberStr = Property::ExtractField(*imagePipelineKey, 2);
@@ -471,13 +486,10 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 	//--------------------------------------------------------------------------
 
 	const u_int keyFieldCount = Property::CountFields(imagePipelinePrefix);
-	auto_ptr<ImagePipeline> imagePipeline(new ImagePipeline());
+	unique_ptr<ImagePipeline> imagePipeline(new ImagePipeline());
 
-	vector<string> imagePipelineKeys = props.GetAllUniqueSubNames(imagePipelinePrefix);
+	vector<string> imagePipelineKeys = props.GetAllUniqueSubNames(imagePipelinePrefix, true);
 	if (imagePipelineKeys.size() > 0) {
-		// Sort the entries
-		sort(imagePipelineKeys.begin(), imagePipelineKeys.end());
-
 		SDL_LOG("Image pipeline: " << imagePipelinePrefix);
 		for (vector<string>::const_iterator imagePipelineKey = imagePipelineKeys.begin(); imagePipelineKey != imagePipelineKeys.end(); ++imagePipelineKey) {
 			// Extract the plugin priority name
@@ -581,8 +593,8 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				const bool filterSpikes = props.Get(Property(prefix + ".filterspikes")(false)).Get<bool>();
 				const bool applyDenoise = props.Get(Property(prefix + ".applydenoise")(true)).Get<bool>();
 				const float prefilterThresholdStDevFactor = props.Get(Property(prefix + ".spikestddev")(2.f)).Get<float>();
-				
-				const int threadCount = (userThreadCount > 0) ? userThreadCount : boost::thread::hardware_concurrency();
+
+				const int threadCount = (userThreadCount > 0) ? userThreadCount : GetHardwareThreadCount();
 				
 				imagePipeline->AddPlugin(new BCDDenoiserPlugin(
 						warmUpSamplesPerPixel,
@@ -601,7 +613,21 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 				const u_int type = props.Get(Property(prefix + ".index")(0)).Get<u_int>();
 				imagePipeline->AddPlugin(new PatternsPlugin(type));
 			} else if (type == "INTEL_OIDN") {
-				imagePipeline->AddPlugin(new IntelOIDN());
+				const string filterType = props.Get(Property(prefix + ".filter.type")("RT")).Get<string>();
+				const int oidnMemLimit = props.Get(Property(prefix + ".oidnmemory")(6000)).Get<int>();
+				const float sharpness = Clamp(props.Get(Property(prefix + ".sharpness")(.1f)).Get<float>(), 0.f, 1.f);
+				imagePipeline->AddPlugin(new IntelOIDN(filterType, oidnMemLimit, sharpness));
+			} else if (type == "WHITE_BALANCE") {
+				const float temperature = Clamp(props.Get(Property(prefix + ".temperature")(6500.f)).Get<float>(), 1000.f, 40000.f);
+				imagePipeline->AddPlugin(new WhiteBalance(temperature));
+			} else if (type == "BAKEMAP_MARGIN") {
+				const u_int marginPixels = Max(props.Get(Property(prefix + ".margin")(2)).Get<u_int>(), 1u);
+				const float samplesThreshold = Max(props.Get(Property(prefix + ".samplesthreshold")(0.f)).Get<float>(), 0.f);
+				imagePipeline->AddPlugin(new BakeMapMarginPlugin(marginPixels, samplesThreshold));
+			} else if (type == "COLOR_LUT") {
+				const string fileName = props.Get(Property(prefix + ".file")("lut.cube")).Get<string>();
+				const float strength = Clamp(props.Get(Property(prefix + ".strength")(1.f)).Get<float>(), 0.f, 1.f);
+				imagePipeline->AddPlugin(new ColorLUTPlugin(fileName, strength));
 			} else
 				throw runtime_error("Unknown image pipeline plugin type: " + type);
 		}
@@ -622,11 +648,8 @@ ImagePipeline *Film::CreateImagePipeline(const Properties &props, const string &
 
 void Film::ParseImagePipelines(const Properties &props) {
 	// Look for the definition of multiple image pipelines
-	vector<string> imagePipelineKeys = props.GetAllUniqueSubNames("film.imagepipelines");
-	if (imagePipelineKeys.size() > 0) {
-		// Sort the entries
-		sort(imagePipelineKeys.begin(), imagePipelineKeys.end());
-
+	vector<string> imagePipelineKeys = props.GetAllUniqueSubNames("film.imagepipelines", true);
+	if (imagePipelineKeys.size() > 0) {	
 		for (vector<string>::const_iterator imagePipelineKey = imagePipelineKeys.begin(); imagePipelineKey != imagePipelineKeys.end(); ++imagePipelineKey) {
 			// Extract the image pipeline priority name
 			const string imagePipelineNumberStr = Property::ExtractField(*imagePipelineKey, 2);
@@ -695,19 +718,42 @@ void Film::Parse(const Properties &props) {
 	// Check if there is a new halt test
 	//--------------------------------------------------------------------------
 
-	if (props.IsDefined("batch.haltthreshold")) {
+	if (props.IsDefined("batch.haltnoisethreshold") || 
+		props.IsDefined("batch.haltthreshold")) {
 		delete convTest;
 		convTest = NULL;
 
-		haltThreshold = props.Get(Property("batch.haltthreshold")(0.f)).Get<float>();
+		haltNoiseThreshold = props.Get(Property("batch.haltnoisethreshold")(
+				props.Get(Property("batch.haltthreshold")(-1.f)).Get<float>()
+				)).Get<float>();
 
-		if (haltThreshold > 0.f) {
-			haltThresholdWarmUp = props.Get(Property("batch.haltthreshold.warmup")(64)).Get<u_int>();
-			haltThresholdTestStep = props.Get(Property("batch.haltthreshold.step")(64)).Get<u_int>();
-			haltThresholdUseFilter = props.Get(Property("batch.haltthreshold.filter.enable")(true)).Get<bool>();
-			haltThresholdStopRendering = props.Get(Property("batch.haltthreshold.stoprendering.enable")(true)).Get<bool>();
+		if (haltNoiseThreshold > 0.f) {
+			haltNoiseThresholdWarmUp = props.Get(Property("batch.haltnoisethreshold.warmup")(
+						props.Get(Property("batch.haltthreshold.warmup")(64)).Get<u_int>()
+					)).Get<u_int>();
 
-			convTest = new FilmConvTest(this, haltThreshold, haltThresholdWarmUp, haltThresholdTestStep, haltThresholdUseFilter);
+			haltNoiseThresholdTestStep = props.Get(Property("batch.haltnoisethreshold.step")(
+						props.Get(Property("batch.haltthreshold.step")(64)).Get<u_int>()
+					)).Get<u_int>();
+					
+			haltNoiseThresholdUseFilter = props.Get(Property("batch.haltnoisethreshold.filter.enable")(
+						props.Get(Property("batch.haltthreshold.filter.enable")(true)).Get<bool>()
+					)).Get<bool>();
+
+			haltNoiseThresholdStopRendering = props.Get(Property("batch.haltnoisethreshold.stoprendering.enable")(
+						props.Get(Property("batch.haltthreshold.stoprendering.enable")(true)).Get<bool>()
+					)).Get<bool>();
+				
+			haltNoiseThresholdImagePipelineIndex = props.Get(Property("batch.haltnoisethreshold.index")(0)).Get<u_int>();
+
+			if (haltNoiseThresholdImagePipelineIndex >= GetImagePipelineCount()) {
+				SLG_LOG("WARNING: Halt thereshold image pipeline index not available. Reverting to first image pipeline");
+				haltNoiseThresholdImagePipelineIndex = 0;
+			}
+
+			convTest = new FilmConvTest(this, haltNoiseThreshold, haltNoiseThresholdWarmUp,
+					haltNoiseThresholdTestStep, haltNoiseThresholdUseFilter,
+					haltNoiseThresholdImagePipelineIndex);
 		}
 	}
 
@@ -716,4 +762,27 @@ void Film::Parse(const Properties &props) {
 
 	if (props.IsDefined("batch.haltspp"))
 		haltSPP = Max(0u, props.Get(Property("batch.haltspp")(0u)).Get<u_int>());
+
+
+	//--------------------------------------------------------------------------
+	// Check if there is adaptive sampling
+	//--------------------------------------------------------------------------
+
+	if (props.HaveNamesRE("film.noiseestimation\\..+")) {
+		delete noiseEstimation;
+		noiseEstimation = NULL;
+
+		noiseEstimationWarmUp = props.Get(Property("film.noiseestimation.warmup")(32)).Get<u_int>();
+		noiseEstimationTestStep = props.Get(Property("film.noiseestimation.step")(32)).Get<u_int>();
+		noiseEstimationFilterScale = props.Get(Property("film.noiseestimation.filter.scale")(4)).Get<u_int>();
+
+		noiseEstimationImagePipelineIndex = props.Get(Property("film.noiseestimation.index")(0)).Get<u_int>();
+		if (noiseEstimationImagePipelineIndex >= GetImagePipelineCount()) {
+			SLG_LOG("WARNING: Noise estimation image pipeline index not available. Reverting to first image pipeline");
+			noiseEstimationImagePipelineIndex = 0;
+		}
+
+		noiseEstimation = new FilmNoiseEstimation(this, noiseEstimationWarmUp,
+				noiseEstimationTestStep, noiseEstimationFilterScale, noiseEstimationImagePipelineIndex);
+	}
 }

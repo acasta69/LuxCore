@@ -65,7 +65,7 @@ static void BatchRendering(RenderConfig *config, RenderState *startState, Film *
 		LC_LOG(boost::str(boost::format("[Elapsed time: %3d/%dsec][Samples %4d/%d][Convergence %f%%][Avg. samples/sec % 3.2fM on %.1fK tris]") %
 				int(elapsedTime) % int(haltTime) % pass % haltSpp % (100.f * convergence) %
 				(stats.Get("stats.renderengine.total.samplesec").Get<double>() / 1000000.0) %
-				(stats.Get("stats.dataset.trianglecount").Get<double>() / 1000.0)));		
+				(stats.Get("stats.dataset.trianglecount").Get<double>() / 1000.0)));
 	}
 
 	// Stop the rendering
@@ -218,11 +218,6 @@ int main(int argc, char *argv[]) {
 		delete scene;
 
 		LC_LOG("Done.");
-#if !defined(LUXRAYS_DISABLE_OPENCL)
-	} catch (cl::Error &err) {
-		LC_LOG("OpenCL ERROR: " << err.what() << "(" << oclErrorString(err.err()) << ")");
-		return EXIT_FAILURE;
-#endif
 	} catch (runtime_error &err) {
 		LC_LOG("RUNTIME ERROR: " << err.what());
 		return EXIT_FAILURE;

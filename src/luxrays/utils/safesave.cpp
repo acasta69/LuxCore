@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -26,7 +26,6 @@
 
 using namespace std;
 using namespace luxrays;
-using namespace slg;
 
 //------------------------------------------------------------------------------
 // SafeSave

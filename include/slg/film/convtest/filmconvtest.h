@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -35,8 +35,10 @@ class Film;
 class FilmConvTest {
 public:
 	FilmConvTest(const Film *film, const float threshold, const u_int warmup,
-			const u_int testStep, const bool useFilter);
+			const u_int testStep, const bool useFilter, const u_int imagePipelineIndex);
 	~FilmConvTest();
+
+	bool IsTestUpdateRequired() const;
 
 	void Reset();
 	u_int Test();
@@ -56,6 +58,7 @@ private:
 	u_int warmup;
 	u_int testStep;
 	bool useFilter;
+	u_int imagePipelineIndex;
 
 	const Film *film;
 

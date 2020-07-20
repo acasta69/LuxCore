@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -20,7 +20,7 @@
 
 #include <boost/format.hpp>
 
-#include "luxrays/core/oclintersectiondevice.h"
+#include "luxrays/devices/ocldevice.h"
 
 #include "slg/slg.h"
 #include "slg/engines/tilepathocl/tilepathocl.h"
@@ -48,12 +48,12 @@ TilePathOCLRenderEngine::~TilePathOCLRenderEngine() {
 }
 
 PathOCLBaseOCLRenderThread *TilePathOCLRenderEngine::CreateOCLThread(const u_int index,
-	OpenCLIntersectionDevice *device) {
+	HardwareIntersectionDevice *device) {
 	return new TilePathOCLRenderThread(index, device, this);
 }
 
 PathOCLBaseNativeRenderThread *TilePathOCLRenderEngine::CreateNativeThread(const u_int index,
-			luxrays::NativeThreadIntersectionDevice *device) {
+			luxrays::NativeIntersectionDevice *device) {
 	return new TilePathNativeRenderThread(index, device, this);
 }
 
@@ -124,7 +124,7 @@ void TilePathOCLRenderEngine::InitTileRepository() {
 }
 
 RenderState *TilePathOCLRenderEngine::GetRenderState() {
-	return new TilePathOCLRenderState(bootStrapSeed, tileRepository);
+	return new TilePathOCLRenderState(bootStrapSeed, tileRepository, photonGICache);
 }
 
 void TilePathOCLRenderEngine::StartLockLess() {
@@ -149,9 +149,10 @@ void TilePathOCLRenderEngine::StartLockLess() {
 	aaSamples = (GetType() == TILEPATHOCL) ?
 		Max(1, cfg.Get(defaultProps.Get("tilepath.sampling.aa.size")).Get<int>()) :
 		1;
-	usePixelAtomics = true;
-	maxTilePerDevice = cfg.Get(Property("tilepathocl.devices.maxtiles")(16)).Get<u_int>();
 
+	maxTilePerDevice = cfg.Get(Property("tilepathocl.devices.maxtiles")(16)).Get<u_int>();
+	// pathTracer must be configured here because it is then used
+	// to set tileRepository->varianceClamping, etc.
 	pathTracer.ParseOptions(cfg, defaultProps);
 
 	//--------------------------------------------------------------------------
@@ -169,8 +170,14 @@ void TilePathOCLRenderEngine::StartLockLess() {
 		SLG_LOG("Continuing the rendering with new TILEPATHCPU seed: " + ToString(newSeed));
 		SetSeed(newSeed);
 
+		// Transfer the ownership of TileRepository pointer
 		tileRepository = rs->tileRepository;
-		
+		rs->tileRepository = nullptr;
+
+		// Transfer the ownership of PhotonGI cache pointer
+		photonGICache = rs->photonGICache;
+		rs->photonGICache = nullptr;
+
 		delete startRenderState;
 		startRenderState = NULL;
 		
@@ -187,10 +194,6 @@ void TilePathOCLRenderEngine::StartLockLess() {
 	pathTracer.InitPixelFilterDistribution(pixelFilter);
 
 	PathOCLBaseRenderEngine::StartLockLess();
-	
-	// Set pathTracer PhotonGI. photonGICache is eventually initialized
-	// inside PathOCLBaseRenderEngine::StartLockLess()
-	pathTracer.SetPhotonGICache(photonGICache);
 }
 
 void TilePathOCLRenderEngine::StopLockLess() {
@@ -228,6 +231,8 @@ void TilePathOCLRenderEngine::UpdateCounters() {
 Properties TilePathOCLRenderEngine::ToProperties(const Properties &cfg) {
 	return OCLRenderEngine::ToProperties(cfg) <<
 			cfg.Get(GetDefaultProps().Get("renderengine.type")) <<
+			// Force true
+			Property("pathocl.pixelatomics.enable")(true) <<
 			cfg.Get(GetDefaultProps().Get("tilepath.sampling.aa.size")) <<
 			cfg.Get(GetDefaultProps().Get("tilepathocl.devices.maxtiles")) <<
 			PathTracer::ToProperties(cfg) <<
@@ -243,6 +248,8 @@ const Properties &TilePathOCLRenderEngine::GetDefaultProps() {
 	static Properties props = Properties() <<
 			OCLRenderEngine::GetDefaultProps() <<
 			Property("renderengine.type")(GetObjectTag()) <<
+			// Force true
+			Property("pathocl.pixelatomics.enable")(true) <<
 			Property("tilepath.sampling.aa.size")(3) <<
 			Property("tilepathocl.devices.maxtiles")(16) <<
 			PathTracer::GetDefaultProps() <<

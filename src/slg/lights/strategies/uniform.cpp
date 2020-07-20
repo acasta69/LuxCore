@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -32,6 +32,9 @@ void LightStrategyUniform::Preprocess(const Scene *scn, const LightStrategyTask 
 	DistributionLightStrategy::Preprocess(scn, taskType);
 	
 	const u_int lightCount = scene->lightDefs.GetSize();
+	if (lightCount == 0)
+		return;
+
 	vector<float> lightPower;
 	lightPower.reserve(lightCount);
 

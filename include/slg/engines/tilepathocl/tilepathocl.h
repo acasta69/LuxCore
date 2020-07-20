@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -21,6 +21,8 @@
 
 #if !defined(LUXRAYS_DISABLE_OPENCL)
 
+#include <vector>
+
 #include "slg/engines/tilepathcpu/tilepathcpu.h"
 #include "slg/engines/pathoclbase/pathoclbase.h"
 
@@ -34,17 +36,22 @@ class TilePathOCLRenderEngine;
 
 class TilePathOCLRenderThread : public PathOCLBaseOCLRenderThread {
 public:
-	TilePathOCLRenderThread(const u_int index, luxrays::OpenCLIntersectionDevice *device,
+	TilePathOCLRenderThread(const u_int index, luxrays::HardwareIntersectionDevice *device,
 			TilePathOCLRenderEngine *re);
 	virtual ~TilePathOCLRenderThread();
 
 	friend class TilePathOCLRenderEngine;
 
 protected:
+	void UpdateSamplerData(const TileWork &tileWork,
+			slg::ocl::TilePathSamplerSharedData &samplerData);
+
 	virtual void GetThreadFilmSize(u_int *filmWidth, u_int *filmHeight, u_int *filmSubRegion);
 	virtual void RenderThreadImpl();
 	
-	void RenderTileWork(const TileWork &tileWork, const u_int filmIndex);
+	void RenderTileWork(const TileWork &tileWork,
+			slg::ocl::TilePathSamplerSharedData &samplerData,
+			const u_int filmIndex);
 };
 
 //------------------------------------------------------------------------------
@@ -53,7 +60,7 @@ protected:
 
 class TilePathNativeRenderThread : public PathOCLBaseNativeRenderThread {
 public:
-	TilePathNativeRenderThread(const u_int index, luxrays::NativeThreadIntersectionDevice *device,
+	TilePathNativeRenderThread(const u_int index, luxrays::NativeIntersectionDevice *device,
 			TilePathOCLRenderEngine *re);
 	virtual ~TilePathNativeRenderThread();
 
@@ -112,9 +119,9 @@ protected:
 	static const luxrays::Properties &GetDefaultProps();
 
 	virtual PathOCLBaseOCLRenderThread *CreateOCLThread(const u_int index,
-		luxrays::OpenCLIntersectionDevice *device);
+		luxrays::HardwareIntersectionDevice *device);
 	virtual PathOCLBaseNativeRenderThread *CreateNativeThread(const u_int index,
-			luxrays::NativeThreadIntersectionDevice *device);
+			luxrays::NativeIntersectionDevice *device);
 
 	virtual void StartLockLess();
 	virtual void StopLockLess();

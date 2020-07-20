@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -31,10 +31,10 @@ using namespace std;
 using namespace luxrays;
 using namespace slg;
 
-CompiledScene::CompiledScene(Scene *scn, const PhotonGICache *pgi) {
+CompiledScene::CompiledScene(Scene *scn, const PathTracer *pt) {
 	scene = scn;
-	photonGICache = pgi;
-	maxMemPageSize = 0xffffffffu;
+	pathTracer = pt;
+	maxMemPageSize = numeric_limits<size_t>::max();
 
 	lightsDistribution = NULL;
 	infiniteLightSourcesDistribution = NULL;
@@ -50,7 +50,7 @@ CompiledScene::~CompiledScene() {
 }
 
 void CompiledScene::SetMaxMemPageSize(const size_t maxSize) {
-	maxMemPageSize = (u_int)Min<size_t>(maxSize, 0xffffffffu);
+	maxMemPageSize = maxSize;
 }
 
 void CompiledScene::EnableCode(const std::string &tags) {
@@ -94,7 +94,7 @@ void CompiledScene::Recompile(const EditActionList &editActions) {
 
 	if (wasGeometryCompiled || wasMaterialsCompiled || wasSceneObjectsCompiled ||
 			wasLightsCompiled || wasImageMapsCompiled)
-		CompilePhotonGI();
+		CompilePathTracer();
 	
 	// For some debugging
 //	cout << "=========================================================\n";
@@ -102,64 +102,6 @@ void CompiledScene::Recompile(const EditActionList &editActions) {
 //	cout << "=========================================================\n";
 //	cout << GetMaterialsEvaluationSourceCode();
 //	cout << "=========================================================\n";
-}
-
-bool CompiledScene::IsMaterialCompiled(const MaterialType type) const {
-	return (usedMaterialTypes.find(type) != usedMaterialTypes.end());
-}
-
-bool CompiledScene::IsLightSourceCompiled(const LightSourceType type) const {
-	return (usedLightSourceTypes.find(type) != usedLightSourceTypes.end());
-}
-
-bool CompiledScene::IsTextureCompiled(const TextureType type) const {
-	return (usedTextureTypes.find(type) != usedTextureTypes.end());
-}
-
-bool CompiledScene::IsImageMapFormatCompiled(const ImageMapStorage::StorageType type) const {
-	return (usedImageMapFormats.find(type) != usedImageMapFormats.end());
-}
-
-bool CompiledScene::IsImageMapChannelCountCompiled(const u_int count) const {
-	return (usedImageMapChannels.find(count) != usedImageMapChannels.end());
-}
-
-bool CompiledScene::IsImageMapWrapCompiled(const ImageMapStorage::WrapType type) const {
-	return (usedImageMapWrapTypes.find(type) != usedImageMapWrapTypes.end());
-}
-
-bool CompiledScene::HasBumpMaps() const {
-	return useBumpMapping;
-}
-
-bool CompiledScene::RequiresPassThrough() const {
-	return (useTransparency ||
-			IsMaterialCompiled(GLASS) ||
-			IsMaterialCompiled(ARCHGLASS) ||
-			IsMaterialCompiled(MIX) ||
-			IsMaterialCompiled(NULLMAT) ||
-			IsMaterialCompiled(MATTETRANSLUCENT) ||
-			IsMaterialCompiled(ROUGHMATTETRANSLUCENT) ||
-			IsMaterialCompiled(GLOSSY2) ||
-			IsMaterialCompiled(ROUGHGLASS) ||
-			IsMaterialCompiled(CARPAINT) ||
-			IsMaterialCompiled(GLOSSYTRANSLUCENT) ||
-			IsMaterialCompiled(GLOSSYCOATING) ||
-			IsMaterialCompiled(CLEAR_VOL) ||
-			IsMaterialCompiled(HOMOGENEOUS_VOL) ||
-			IsMaterialCompiled(HETEROGENEOUS_VOL) ||
-			// BLENDER_NOISE uses the pass through random variable
-			IsTextureCompiled(BLENDER_NOISE));
-}
-
-bool CompiledScene::HasVolumes() const {
-	return IsMaterialCompiled(HOMOGENEOUS_VOL) ||
-			IsMaterialCompiled(CLEAR_VOL) ||
-			IsMaterialCompiled(HETEROGENEOUS_VOL) ||
-			// Volume rendering may be required to evaluate the IOR
-			IsMaterialCompiled(GLASS) ||
-			IsMaterialCompiled(ARCHGLASS) ||
-			IsMaterialCompiled(ROUGHGLASS);
 }
 
 string CompiledScene::ToOCLString(const slg::ocl::Spectrum &v) {

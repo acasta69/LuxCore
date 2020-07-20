@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -26,10 +26,12 @@ using namespace slg;
 // Velvet material
 //------------------------------------------------------------------------------
 
-VelvetMaterial::VelvetMaterial(const Texture *transp, const Texture *emitted, const Texture *bump,
+VelvetMaterial::VelvetMaterial(const Texture *frontTransp, const Texture *backTransp,
+		const Texture *emitted, const Texture *bump,
 		const Texture *kd, const Texture *p1, const Texture *p2, const Texture *p3,
-		const Texture *thickness) : Material(transp, emitted, bump), Kd(kd),
-		P1(p1), P2(p2), P3(p3), Thickness(thickness) {
+		const Texture *thickness) :
+			Material(frontTransp, backTransp, emitted, bump), Kd(kd),
+			P1(p1), P2(p2), P3(p3), Thickness(thickness) {
 	glossiness = 1.f;
 }
 
@@ -78,14 +80,12 @@ Spectrum VelvetMaterial::Evaluate(const HitPoint &hitPoint,
 Spectrum VelvetMaterial::Sample(const HitPoint &hitPoint,
 	const Vector &localFixedDir, Vector *localSampledDir,
 	const float u0, const float u1, const float passThroughEvent,
-	float *pdfW, float *absCosSampledDir, BSDFEvent *event) const {
+	float *pdfW, BSDFEvent *event, const BSDFEvent eventHint) const {
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
 	*localSampledDir = Sgn(localFixedDir.z) * CosineSampleHemisphere(u0, u1, pdfW);
-
-	*absCosSampledDir = fabsf(localSampledDir->z);
-	if (*absCosSampledDir < DEFAULT_COS_EPSILON_STATIC)
+	if (fabsf(CosTheta(*localSampledDir)) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
 	*event = DIFFUSE | REFLECT;
@@ -155,11 +155,11 @@ Properties VelvetMaterial::ToProperties(const ImageMapCache &imgMapCache, const 
 
 	const std::string name = GetName();
 	props.Set(Property("scene.materials." + name + ".type")("velvet"));
-	props.Set(Property("scene.materials." + name + ".kd")(Kd->GetName()));
-	props.Set(Property("scene.materials." + name + ".p1")(P1->GetName()));
-	props.Set(Property("scene.materials." + name + ".p2")(P2->GetName()));
-	props.Set(Property("scene.materials." + name + ".p3")(P3->GetName()));
-	props.Set(Property("scene.materials." + name + ".thickness")(Thickness->GetName()));
+	props.Set(Property("scene.materials." + name + ".kd")(Kd->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".p1")(P1->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".p2")(P2->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".p3")(P3->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".thickness")(Thickness->GetSDLValue()));
 	props.Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;

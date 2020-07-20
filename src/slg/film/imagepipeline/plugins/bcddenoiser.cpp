@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -66,7 +66,7 @@ static void WriteEXR(const string &fileName, const bcd::Deepimf &img) {
 				fileName + " (error = " + geterror() + ")");
 }*/
 
-
+	
 //------------------------------------------------------------------------------
 // Background image plugin
 //------------------------------------------------------------------------------
@@ -185,10 +185,13 @@ void BCDDenoiserPlugin::Apply(Film &film, const u_int index, const bool pixelNor
 	Film::FilmChannelType channel = pixelNormalizedSampleAccumulator ?
 		Film::RADIANCE_PER_PIXEL_NORMALIZED : Film::RADIANCE_PER_SCREEN_NORMALIZED;
 
+	const double RADIANCE_PER_SCREEN_NORMALIZED_SampleCount = film.GetTotalLightSampleCount();
+	
 	for(u_int y = 0; y < height; ++y) {
 		for(u_int x = 0; x < width; ++x) {
 			Spectrum color;
 			film.GetPixelFromMergedSampleBuffers(channel, &filmDenoiser.GetRadianceChannelScales(),
+					RADIANCE_PER_SCREEN_NORMALIZED_SampleCount,
 					x, y, color.c);
 			
 			color = (color *  sampleScale).Clamp(0.f, sampleMaxValue);

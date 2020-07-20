@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -80,10 +80,10 @@ protected:
 		const float u0, const float u1, const float u2,
 		const float u3, const float u4,
 		const PathVertexVM &eyeVertex, SampleResult &eyeSampleResult) const;
-	void DirectHitLight(const bool finiteLightSource, const luxrays::Ray &ray,
-		const PathVertexVM &eyeVertex, SampleResult &eyeSampleResult) const;
+	void DirectHitLight(const bool finiteLightSource, const PathVertexVM &eyeVertex,
+		SampleResult &eyeSampleResult) const;
 	void DirectHitLight(const LightSource *light, const luxrays::Spectrum &lightRadiance,
-		const float directPdfA, const float emissionPdfW, const luxrays::Ray &ray,
+		const float directPdfA, const float emissionPdfW,
 		const PathVertexVM &eyeVertex, luxrays::Spectrum *radiance) const;
 
 	void ConnectVertices(const float time,

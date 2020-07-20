@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -34,22 +34,31 @@ StereoCamera::~StereoCamera() {
 	delete rightEye;
 }
 
-Matrix4x4 StereoCamera::GetRasterToCameraMatrix(const u_int index) const {
+const Transform &StereoCamera::GetRasterToCamera(const u_int index) const {
 	if (index == 0)
-		return leftEye->GetRasterToCameraMatrix();
+		return leftEye->GetRasterToCamera();
 	else if (index == 1)
-		return rightEye->GetRasterToCameraMatrix();
+		return rightEye->GetRasterToCamera();
 	else
-		throw runtime_error("Unknown index in GetRasterToCameraMatrix(): " + ToString(index));
+		throw runtime_error("Unknown index in GetRasterToCamera(): " + ToString(index));
 }
 
-Matrix4x4 StereoCamera::GetCameraToWorldMatrix(const u_int index) const {
+const Transform &StereoCamera::GetCameraToWorld(const u_int index) const {
 	if (index == 0)
-		return leftEye->GetCameraToWorldMatrix();
+		return leftEye->GetCameraToWorld();
 	else if (index == 1)
-		return rightEye->GetCameraToWorldMatrix();
+		return rightEye->GetCameraToWorld();
 	else
-		throw runtime_error("Unknown index in GetCameraToWorldMatrix(): " + ToString(index));
+		throw runtime_error("Unknown index in GetCameraToWorld(): " + ToString(index));
+}
+
+const Transform &StereoCamera::GetScreenToWorld(const u_int index) const {
+	if (index == 0)
+		return leftEye->GetScreenToWorld();
+	else if (index == 1)
+		return rightEye->GetScreenToWorld();
+	else
+		throw runtime_error("Unknown index in GetScreenToWorld(): " + ToString(index));
 }
 
 void StereoCamera::Update(const u_int width, const u_int height,
@@ -115,13 +124,14 @@ void StereoCamera::Update(const u_int width, const u_int height,
 	rightEye->Update(filmWidth / 2, filmHeight, NULL);
 }
 
-void StereoCamera::GenerateRay(const float filmX, const float filmY,
+void StereoCamera::GenerateRay(const float time,
+		const float filmX, const float filmY,
 		Ray *ray, PathVolumeInfo *volInfo,
-		const float u1, const float u2, const float u3) const {
+		const float u0, const float u1) const {
 	if (filmX < filmWidth / 2)
-		leftEye->GenerateRay(filmX, filmY, ray, volInfo, u1, u2, u3);
+		leftEye->GenerateRay(time, filmX, filmY, ray, volInfo, u0, u1);
 	else
-		rightEye->GenerateRay(filmX - filmWidth / 2, filmY, ray, volInfo, u1, u2, u3);
+		rightEye->GenerateRay(time, filmX - filmWidth / 2, filmY, ray, volInfo, u0, u1);
 }
 
 bool StereoCamera::GetSamplePosition(Ray *eyeRay, float *filmX, float *filmY) const {
@@ -135,9 +145,11 @@ bool StereoCamera::SampleLens(const float time, const float u1, const float u2,
 	return leftEye->SampleLens(time, u1, u2, lensPoint);
 }
 
-float StereoCamera::GetPDF(const Vector &eyeDir, const float filmX, const float filmY) const {
+void StereoCamera::GetPDF(const Ray &eyeRay, const float eyeDistance,
+		const float filmX, const float filmY,
+		float *pdfW, float *fluxToRadianceFactor) const {
 	// BIDIRCPU/LIGHTCPU don't support stereo rendering
-	return leftEye->GetPDF(eyeDir, filmX, filmY);
+	leftEye->GetPDF(eyeRay, eyeDistance, filmX, filmY, pdfW, fluxToRadianceFactor);
 }
 
 Properties StereoCamera::ToProperties() const {

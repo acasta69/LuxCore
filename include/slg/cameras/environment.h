@@ -36,11 +36,14 @@ public:
 	virtual luxrays::BBox GetBBox() const { return ComputeBBox(orig); }
 	virtual const luxrays::Vector GetDir() const { return dir; }
 	virtual float GetPixelArea() const { return pixelArea; }
-	virtual luxrays::Matrix4x4 GetRasterToCameraMatrix(const u_int index = 0) const {
-		return camTrans.rasterToCamera.GetMatrix();
+	virtual const luxrays::Transform &GetRasterToCamera(const u_int index = 0) const {
+		return camTrans.rasterToCamera;
 	}
-	virtual luxrays::Matrix4x4 GetCameraToWorldMatrix(const u_int index = 0) const {
-		return camTrans.cameraToWorld.GetMatrix();
+	virtual const luxrays::Transform &GetCameraToWorld(const u_int index = 0) const {
+		return camTrans.cameraToWorld;
+	}
+	virtual const luxrays::Transform &GetScreenToWorld(const u_int index = 0) const {
+		return camTrans.screenToWorld;
 	}
 
 	// Mostly used by GUIs
@@ -92,25 +95,23 @@ public:
 	virtual void UpdateAuto(const Scene *scene) { };
 
 	// Rendering methods
-	virtual void GenerateRay(
+	virtual void GenerateRay(const float time,
 		const float filmX, const float filmY,
 		luxrays::Ray *ray, PathVolumeInfo *volInfo,
-		const float u1, const float u2, const float u3) const;
+		const float u1, const float u2) const;
 
 	// Used for connecting light paths to the camera
 	virtual void ClampRay(luxrays::Ray *ray) const;
 	virtual bool GetSamplePosition(luxrays::Ray *eyeRay, float *filmX, float *filmY) const;
 	virtual bool SampleLens(const float time, const float u1, const float u2,
 		luxrays::Point *lensPoint) const;
-	virtual float GetPDF(const luxrays::Vector &eyeDir, const float filmX, const float filmY) const;
+	virtual void GetPDF(const luxrays::Ray &eyeRay, const float eyeDistance,
+		const float filmX, const float filmY,
+		float *pdfW, float *fluxToRadianceFactor) const;
 
 	virtual luxrays::Properties ToProperties() const;
 
 	float screenOffsetX, screenOffsetY;
-
-	// User defined values
-	float lensRadius, focalDistance;
-	bool autoFocus;
 
 protected:
 	typedef struct {

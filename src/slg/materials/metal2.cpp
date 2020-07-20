@@ -1,5 +1,5 @@
 /***************************************************************************
- * Copyright 1998-2018 by authors (see AUTHORS.txt)                        *
+ * Copyright 1998-2020 by authors (see AUTHORS.txt)                        *
  *                                                                         *
  *   This file is part of LuxCoreRender.                                   *
  *                                                                         *
@@ -28,18 +28,37 @@ using namespace slg;
 // LuxRender Metal2 material porting.
 //------------------------------------------------------------------------------
 
-Metal2Material::Metal2Material(const Texture *transp, const Texture *emitted, const Texture *bump,
+Metal2Material::Metal2Material(const Texture *frontTransp, const Texture *backTransp,
+		const Texture *emitted, const Texture *bump,
 		const Texture *nn, const Texture *kk, const Texture *u, const Texture *v) :
-		Material(transp, emitted, bump), fresnelTex(NULL), n(nn), k(kk), nu(u), nv(v) {
+			Material(frontTransp, backTransp, emitted, bump),
+			fresnelTex(NULL), n(nn), k(kk), nu(u), nv(v) {
 	glossiness = ComputeGlossiness(nu, nv);
 }
 
-Metal2Material::Metal2Material(const Texture *transp, const Texture *emitted, const Texture *bump,
+Metal2Material::Metal2Material(const Texture *frontTransp, const Texture *backTransp,
+		const Texture *emitted, const Texture *bump,
 		const FresnelTexture *ft, const Texture *u, const Texture *v) :
-		Material(transp, emitted, bump), fresnelTex(ft), n(NULL), k(NULL), nu(u), nv(v) {
+			Material(frontTransp, backTransp, emitted, bump),
+			fresnelTex(ft), n(NULL), k(NULL), nu(u), nv(v) {
 	glossiness = ComputeGlossiness(nu, nv);
 }
 
+Spectrum Metal2Material::Albedo(const HitPoint &hitPoint) const {
+	Spectrum F;
+	if (fresnelTex)
+		F = fresnelTex->Evaluate(hitPoint, 1.f);
+	else {
+		// For compatibility with the past
+		const Spectrum etaVal = n->GetSpectrumValue(hitPoint).Clamp(.001f);
+		const Spectrum kVal = k->GetSpectrumValue(hitPoint).Clamp(.001f);
+		F = FresnelTexture::GeneralEvaluate(etaVal, kVal, 1.f);
+	}
+	F.Clamp(0.f, 1.f);
+	
+	return F;
+}
+	
 Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 	const Vector &localLightDir, const Vector &localEyeDir, BSDFEvent *event,
 	float *directPdfW, float *reversePdfW) const {
@@ -79,7 +98,7 @@ Spectrum Metal2Material::Evaluate(const HitPoint &hitPoint,
 Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 	const Vector &localFixedDir, Vector *localSampledDir,
 	const float u0, const float u1, const float passThroughEvent,
-	float *pdfW, float *absCosSampledDir, BSDFEvent *event) const {
+	float *pdfW, BSDFEvent *event, const BSDFEvent eventHint) const {
 	if (fabsf(localFixedDir.z) < DEFAULT_COS_EPSILON_STATIC)
 		return Spectrum();
 
@@ -98,8 +117,7 @@ Spectrum Metal2Material::Sample(const HitPoint &hitPoint,
 
 	const float coso = fabsf(localFixedDir.z);
 	const float cosi = fabsf(localSampledDir->z);
-	*absCosSampledDir = cosi;
-	if ((*absCosSampledDir < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
+	if ((cosi < DEFAULT_COS_EPSILON_STATIC) || (localFixedDir.z * localSampledDir->z < 0.f))
 		return Spectrum();
 
 	*pdfW = specPdf / (4.f * fabsf(cosWH));
@@ -192,13 +210,13 @@ Properties Metal2Material::ToProperties(const ImageMapCache &imgMapCache, const 
 	const string name = GetName();
 	props.Set(Property("scene.materials." + name + ".type")("metal2"));
 	if (fresnelTex)
-		props.Set(Property("scene.materials." + name + ".fresnel")(fresnelTex->GetName()));
+		props.Set(Property("scene.materials." + name + ".fresnel")(fresnelTex->GetSDLValue()));
 	if (n)
-		props.Set(Property("scene.materials." + name + ".n")(n->GetName()));
+		props.Set(Property("scene.materials." + name + ".n")(n->GetSDLValue()));
 	if (k)
-		props.Set(Property("scene.materials." + name + ".k")(k->GetName()));
-	props.Set(Property("scene.materials." + name + ".uroughness")(nu->GetName()));
-	props.Set(Property("scene.materials." + name + ".vroughness")(nv->GetName()));
+		props.Set(Property("scene.materials." + name + ".k")(k->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".uroughness")(nu->GetSDLValue()));
+	props.Set(Property("scene.materials." + name + ".vroughness")(nv->GetSDLValue()));
 	props.Set(Material::ToProperties(imgMapCache, useRealFileName));
 
 	return props;
