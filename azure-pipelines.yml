@@ -17,8 +17,7 @@ trigger:
     - '*'
   tags:
     include:
-    - 'lucorerender_v*'
-
+    - 'luxcorerender_v*'
 
 
 jobs:
