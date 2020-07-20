@@ -17,15 +17,6 @@ trigger:
     - '*'
 
 
-trigger:
-  branches:
-    include:
-    - '*'
-  tags:
-    exclude:
-    - '*'
-
-
 jobs:
 # - job: LuxCoreRenderLinux
   # timeoutInMinutes: 0
@@ -49,37 +40,37 @@ jobs:
       # artifactName: LuxCore
     # displayName: 'Upload luxcorerender-latest-linux64-opencl.tar.bz2'
     # condition: eq(variables['System.PullRequest.IsFork'], 'False')
-  dependsOn: DetectBuildType
-  condition: succeeded()
-  timeoutInMinutes: 0
-  pool:
-    vmImage: 'ubuntu-18.04'
-  variables:
-    version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
+  # dependsOn: DetectBuildType
+  # condition: succeeded()
+  # timeoutInMinutes: 0
+  # pool:
+    # vmImage: 'ubuntu-18.04'
+  # variables:
+    # version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
 
-  steps:
-  - template: ./scripts/azurepipeline/linux/linux_jobs.yml
+  # steps:
+  # - template: ./scripts/azurepipeline/linux/linux_jobs.yml
 
 
-- job: LuxCoreRenderLinuxSDK
-  dependsOn: DetectBuildType
-  condition: |
-    and
-    (
-      succeeded(),
-      eq(dependencies.DetectBuildType.outputs['setvarStep.final'], 'TRUE')
-    )
-  timeoutInMinutes: 0
-  pool:
-    vmImage: 'ubuntu-18.04'
-  variables:
-    version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
-    final: $[ dependencies.DetectBuildType.outputs['setvarStep.final'] ]
+# - job: LuxCoreRenderLinuxSDK
+  # dependsOn: DetectBuildType
+  # condition: |
+    # and
+    # (
+      # succeeded(),
+      # eq(dependencies.DetectBuildType.outputs['setvarStep.final'], 'TRUE')
+    # )
+  # timeoutInMinutes: 0
+  # pool:
+    # vmImage: 'ubuntu-18.04'
+  # variables:
+    # version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
+    # final: $[ dependencies.DetectBuildType.outputs['setvarStep.final'] ]
 
-  steps:
-  - template: ./scripts/azurepipeline/linux/linux_jobs.yml
-    parameters:
-      build: 'SDK'
+  # steps:
+  # - template: ./scripts/azurepipeline/linux/linux_jobs.yml
+    # parameters:
+      # build: 'SDK'
 
 
 #==============================================================================
@@ -120,69 +111,69 @@ jobs:
 
 
 
-- job: LuxCoreRenderWindowsSDK
-  dependsOn: DetectBuildType
-  condition: |
-    and
-    (
-      succeeded(),
-      eq(dependencies.DetectBuildType.outputs['setvarStep.final'], 'TRUE')
-    )
-  timeoutInMinutes: 0
-  pool:
-    vmImage: 'vs2017-win2016'
-  variables:
-    version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
-    final: $[ dependencies.DetectBuildType.outputs['setvarStep.final'] ]
+# - job: LuxCoreRenderWindowsSDK
+  # dependsOn: DetectBuildType
+  # condition: |
+    # and
+    # (
+      # succeeded(),
+      # eq(dependencies.DetectBuildType.outputs['setvarStep.final'], 'TRUE')
+    # )
+  # timeoutInMinutes: 0
+  # pool:
+    # vmImage: 'vs2017-win2016'
+  # variables:
+    # version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
+    # final: $[ dependencies.DetectBuildType.outputs['setvarStep.final'] ]
 
-  steps:
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: '3.7'
-      addToPath: true
-      architecture: 'x64'
-  - script: ./scripts/azurepipeline/windows/deps-setup.cmd
-    displayName: Getting required deps
-  - template: ./scripts/azurepipeline/windows/windows_jobs.yml
-    parameters:
-      build_script: './scripts/azurepipeline/windows/build.cmd /cmake-only /dll'
-      post_script: './scripts/azurepipeline/windows/post-build.cmd'
-      ocl_text: 'Unified CPU/OpenCL/CUDA binaries'
-  - task: PublishBuildArtifacts@1
-    inputs:
-      pathtoPublish: '$(Build.ArtifactStagingDirectory)'
-      artifactName: LuxCore
-    displayName: 'Upload luxcorerender-<version>-win64.zip'
-    condition: eq(variables['System.PullRequest.IsFork'], 'False')
+  # steps:
+  # - task: UsePythonVersion@0
+    # inputs:
+      # versionSpec: '3.7'
+      # addToPath: true
+      # architecture: 'x64'
+  # - script: ./scripts/azurepipeline/windows/deps-setup.cmd
+    # displayName: Getting required deps
+  # - template: ./scripts/azurepipeline/windows/windows_jobs.yml
+    # parameters:
+      # build_script: './scripts/azurepipeline/windows/build.cmd /cmake-only /dll'
+      # post_script: './scripts/azurepipeline/windows/post-build.cmd'
+      # ocl_text: 'Unified CPU/OpenCL/CUDA binaries'
+  # - task: PublishBuildArtifacts@1
+    # inputs:
+      # pathtoPublish: '$(Build.ArtifactStagingDirectory)'
+      # artifactName: LuxCore
+    # displayName: 'Upload luxcorerender-<version>-win64.zip'
+    # condition: eq(variables['System.PullRequest.IsFork'], 'False')
 
 
 #==============================================================================
 # MacOS binaries
 #==============================================================================
-- job: LuxCoreRenderMacOS
-  dependsOn: DetectBuildType
-  condition: succeeded()
-  timeoutInMinutes: 0
-  pool:
-    vmImage: 'macOS-10.14'
-  variables:
-    version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
+# - job: LuxCoreRenderMacOS
+  # dependsOn: DetectBuildType
+  # condition: succeeded()
+  # timeoutInMinutes: 0
+  # pool:
+    # vmImage: 'macOS-10.14'
+  # variables:
+    # version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
 
-  steps:
-  - script: ./scripts/azurepipeline/macos/install.sh
-    displayName: Install Build Tools
-  - script: ./scripts/azurepipeline/macos/build.sh
-    displayName: Building LuxCore
-#  - script: ./scripts/azurepipeline/macos/test.sh
-#    displayName: Testing LuxCore
-  - task: InstallAppleCertificate@2
-    inputs:
-      certSecureFile: LuxCore2.q3de.com.p12
-      certPwd: $(AppleCertPwd)
-  - script: ./scripts/azurepipeline/macos/pack.sh
-    displayName: Packing DiskImages
-      pathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    displayName: 'Upload luxcorerender-<version>'
+  # steps:
+  # - script: ./scripts/azurepipeline/macos/install.sh
+    # displayName: Install Build Tools
+  # - script: ./scripts/azurepipeline/macos/build.sh
+    # displayName: Building LuxCore
+# #  - script: ./scripts/azurepipeline/macos/test.sh
+# #    displayName: Testing LuxCore
+  # - task: InstallAppleCertificate@2
+    # inputs:
+      # certSecureFile: LuxCore2.q3de.com.p12
+      # certPwd: $(AppleCertPwd)
+  # - script: ./scripts/azurepipeline/macos/pack.sh
+    # displayName: Packing DiskImages
+      # pathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    # displayName: 'Upload luxcorerender-<version>'
 
 
 #==============================================================================
@@ -197,9 +188,9 @@ jobs:
 - job: DeleteLatestTag
   dependsOn:
   - DetectBuildType
-  - LuxCoreRenderLinux
+  #- LuxCoreRenderLinux
   - LuxCoreRenderWindows
-  - LuxCoreRenderMacOS
+  #- LuxCoreRenderMacOS
   variables:
     version_string: $[ dependencies.DetectBuildType.outputs['setvarStep.version_string'] ]
   condition: |
