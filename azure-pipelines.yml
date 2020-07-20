@@ -20,6 +20,7 @@ trigger:
     - 'luxcorerender_v*'
 
 
+
 jobs:
 - job: DetectBuildType
   timeoutInMinutes: 0
